@@ -1,0 +1,3090 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Sword, Shield, Map as MapIcon, Users, Coins, Crown, ScrollText, Tent, Sparkles, MessageSquare, Package, BookOpen, Flame, Flag, Activity, Send, Castle, Store, ArrowUpCircle, Save, ZoomIn, ZoomOut, AlertTriangle, Megaphone, X, Ship, Anchor, Trophy, Handshake, Skull, RefreshCw } from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
+
+// --- Firebase 初期化 ---
+let app, auth, db, appId;
+try {
+  if (typeof window !== 'undefined' && window.__firebase_config) {
+    const firebaseConfig = JSON.parse(window.__firebase_config);
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'default-app-id';
+  } else if (typeof __firebase_config !== 'undefined') {
+    const firebaseConfig = JSON.parse(__firebase_config);
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  }
+} catch (error) {
+  console.error("Firebase initialization error", error);
+}
+
+// --- ユーティリティ ---
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+// --- マスターデータ ---
+const TROOP_TYPES = {
+  SPEAR: { name: '槍', color: 'text-red-500 bg-red-950 border-red-800' },
+  CAVALRY: { name: '騎', color: 'text-orange-500 bg-orange-950 border-orange-800' },
+  BOW: { name: '弓', color: 'text-blue-500 bg-blue-950 border-blue-800' },
+  SHIELD: { name: '盾', color: 'text-green-500 bg-green-950 border-green-800' },
+  GUN: { name: '鉄砲', color: 'text-purple-500 bg-purple-950 border-purple-800' },
+};
+
+const FACTIONS = { 
+  ODA: '織田', 
+  TAKEDA: '武田', 
+  TOKUGAWA: '徳川', 
+  MOURI: '毛利', 
+  HOUJOU: '北条', 
+  IMAGAWA: '今川', 
+  SHIMAZU: '島津', 
+  UESUGI: '上杉', 
+  CHOSOKABE: '長宗我部', 
+  RYUZOJI: '龍造寺', 
+  AZAI: '浅井', 
+  ASAKURA: '朝倉', 
+  OOTOMO: '大友', 
+  DATE: '伊達', 
+  OTHER: '群' 
+};
+
+// 勢力ごとのテーマカラー定義
+const FACTION_COLORS = {
+  '織田': { bg: 'bg-purple-700', border: 'border-purple-400', text: 'text-purple-100', glow: 'shadow-[0_0_30px_rgba(168,85,247,0.8)]' },
+  '武田': { bg: 'bg-red-700', border: 'border-red-400', text: 'text-red-100', glow: 'shadow-[0_0_30px_rgba(239,68,68,0.8)]' },
+  '徳川': { bg: 'bg-blue-700', border: 'border-blue-400', text: 'text-blue-100', glow: 'shadow-[0_0_30px_rgba(59,130,246,0.8)]' },
+  '毛利': { bg: 'bg-green-700', border: 'border-green-400', text: 'text-green-100', glow: 'shadow-[0_0_30px_rgba(34,197,94,0.8)]' },
+  '北条': { bg: 'bg-yellow-600', border: 'border-yellow-300', text: 'text-yellow-100', glow: 'shadow-[0_0_30px_rgba(234,179,8,0.8)]' },
+  '今川': { bg: 'bg-cyan-700', border: 'border-cyan-400', text: 'text-cyan-100', glow: 'shadow-[0_0_30px_rgba(6,182,212,0.8)]' },
+  '島津': { bg: 'bg-pink-700', border: 'border-pink-400', text: 'text-pink-100', glow: 'shadow-[0_0_30px_rgba(236,72,153,0.8)]' },
+  '上杉': { bg: 'bg-indigo-700', border: 'border-indigo-400', text: 'text-indigo-100', glow: 'shadow-[0_0_30px_rgba(99,102,241,0.8)]' },
+  '長宗我部': { bg: 'bg-orange-700', border: 'border-orange-400', text: 'text-orange-100', glow: 'shadow-[0_0_30px_rgba(249,115,22,0.8)]' },
+  '龍造寺': { bg: 'bg-teal-700', border: 'border-teal-400', text: 'text-teal-100', glow: 'shadow-[0_0_30px_rgba(20,184,166,0.8)]' },
+  '浅井': { bg: 'bg-emerald-700', border: 'border-emerald-400', text: 'text-emerald-100', glow: 'shadow-[0_0_30px_rgba(16,185,129,0.8)]' },
+  '朝倉': { bg: 'bg-lime-700', border: 'border-lime-400', text: 'text-lime-100', glow: 'shadow-[0_0_30px_rgba(132,204,22,0.8)]' },
+  '大友': { bg: 'bg-sky-700', border: 'border-sky-400', text: 'text-sky-100', glow: 'shadow-[0_0_30px_rgba(14,165,233,0.8)]' },
+  '伊達': { bg: 'bg-slate-600', border: 'border-slate-300', text: 'text-slate-100', glow: 'shadow-[0_0_30px_rgba(148,163,184,0.8)]' },
+  '群': { bg: 'bg-stone-600', border: 'border-stone-400', text: 'text-stone-100', glow: 'shadow-[0_0_15px_rgba(120,113,108,0.5)]' },
+};
+
+// プレイヤー（自軍）のカラー
+const PLAYER_COLOR = { bg: 'bg-rose-600', border: 'border-rose-300', text: 'text-white', glow: 'shadow-[0_0_50px_rgba(225,29,72,1)]' };
+
+const MASTER_GENERALS = [
+  { id: 'g1', name: '織田信長', rarity: 5, faction: FACTIONS.ODA, atk: 95, int: 92, def: 85, troop: TROOP_TYPES.GUN, skill: '三段撃ち' },
+  { id: 'g2', name: '武田信玄', rarity: 5, faction: FACTIONS.TAKEDA, atk: 88, int: 98, def: 95, troop: TROOP_TYPES.CAVALRY, skill: '風林火山' },
+  { id: 'g3', name: '本多忠勝', rarity: 5, faction: FACTIONS.TOKUGAWA, atk: 98, int: 60, def: 90, troop: TROOP_TYPES.SPEAR, skill: '蜻蛉切' },
+  { id: 'g4', name: '明智光秀', rarity: 5, faction: FACTIONS.ODA, atk: 85, int: 95, def: 88, troop: TROOP_TYPES.GUN, skill: '本能寺の変' },
+  { id: 'g12', name: '毛利元就', rarity: 5, faction: FACTIONS.MOURI, atk: 80, int: 98, def: 90, troop: TROOP_TYPES.BOW, skill: '百万一心' },
+  { id: 'g14', name: '北条氏康', rarity: 5, faction: FACTIONS.HOUJOU, atk: 85, int: 88, def: 95, troop: TROOP_TYPES.SHIELD, skill: '相模の獅子' },
+  { id: 'g16', name: '今川義元', rarity: 5, faction: FACTIONS.IMAGAWA, atk: 80, int: 85, def: 90, troop: TROOP_TYPES.BOW, skill: '東海道一の弓取り' },
+  { id: 'g18', name: '島津義弘', rarity: 5, faction: FACTIONS.SHIMAZU, atk: 96, int: 70, def: 88, troop: TROOP_TYPES.GUN, skill: '鬼島津' },
+  { id: 'g20', name: '上杉謙信', rarity: 5, faction: FACTIONS.UESUGI, atk: 98, int: 85, def: 92, troop: TROOP_TYPES.CAVALRY, skill: '車懸りの陣' },
+  { id: 'g21', name: '長宗我部元親', rarity: 5, faction: FACTIONS.CHOSOKABE, atk: 85, int: 88, def: 90, troop: TROOP_TYPES.SPEAR, skill: '一領具足' },
+  { id: 'g22', name: '龍造寺隆信', rarity: 5, faction: FACTIONS.RYUZOJI, atk: 92, int: 60, def: 80, troop: TROOP_TYPES.CAVALRY, skill: '肥前の熊' },
+  { id: 'g25', name: '大友宗麟', rarity: 5, faction: FACTIONS.OOTOMO, atk: 70, int: 85, def: 88, troop: TROOP_TYPES.GUN, skill: '国崩し' },
+  { id: 'g26', name: '伊達政宗', rarity: 5, faction: FACTIONS.DATE, atk: 90, int: 88, def: 85, troop: TROOP_TYPES.CAVALRY, skill: '独眼竜' },
+  { id: 'g29', name: '立花道雪', rarity: 5, faction: FACTIONS.OOTOMO, atk: 94, int: 82, def: 90, troop: TROOP_TYPES.SHIELD, skill: '雷切' },
+  { id: 'g5', name: '雑賀孫一', rarity: 4, faction: FACTIONS.OTHER, atk: 85, int: 70, def: 75, troop: TROOP_TYPES.GUN, skill: '八咫烏' },
+  { id: 'g6', name: '山県昌景', rarity: 4, faction: FACTIONS.TAKEDA, atk: 88, int: 65, def: 80, troop: TROOP_TYPES.CAVALRY, skill: '赤備えの突撃' },
+  { id: 'g7', name: '井伊直政', rarity: 4, faction: FACTIONS.TOKUGAWA, atk: 86, int: 70, def: 85, troop: TROOP_TYPES.SPEAR, skill: '井伊の赤鬼' },
+  { id: 'g8', name: '柴田勝家', rarity: 4, faction: FACTIONS.ODA, atk: 90, int: 50, def: 80, troop: TROOP_TYPES.SHIELD, skill: '鬼柴田' },
+  { id: 'g23', name: '浅井長政', rarity: 4, faction: FACTIONS.AZAI, atk: 86, int: 75, def: 82, troop: TROOP_TYPES.SPEAR, skill: '夜叉三郎' },
+  { id: 'g24', name: '朝倉義景', rarity: 4, faction: FACTIONS.ASAKURA, atk: 65, int: 70, def: 60, troop: TROOP_TYPES.BOW, skill: '一乗谷の栄華' },
+  { id: 'g27', name: '直江兼続', rarity: 4, faction: FACTIONS.UESUGI, atk: 75, int: 92, def: 88, troop: TROOP_TYPES.BOW, skill: '愛の兜' },
+  { id: 'g28', name: '鍋島直茂', rarity: 4, faction: FACTIONS.RYUZOJI, atk: 80, int: 90, def: 85, troop: TROOP_TYPES.SHIELD, skill: '葉隠' },
+  { id: 'g30', name: '片倉小十郎', rarity: 4, faction: FACTIONS.DATE, atk: 78, int: 94, def: 86, troop: TROOP_TYPES.BOW, skill: '竜の右目' },
+  { id: 'g9', name: '野武士の頭', rarity: 3, faction: FACTIONS.OTHER, atk: 65, int: 40, def: 50, troop: TROOP_TYPES.BOW, skill: '伏兵' },
+  { id: 'g10', name: '槍足軽将', rarity: 3, faction: FACTIONS.OTHER, atk: 60, int: 35, def: 60, troop: TROOP_TYPES.SPEAR, skill: '槍衾' },
+  { id: 'g11', name: '弓足軽将', rarity: 3, faction: FACTIONS.OTHER, atk: 55, int: 45, def: 40, troop: TROOP_TYPES.BOW, skill: '一斉射撃' },
+  { id: 'g32', name: '一揆衆', rarity: 2, faction: FACTIONS.OTHER, atk: 40, int: 15, def: 35, troop: TROOP_TYPES.SPEAR, skill: '竹槍突撃' },
+  { id: 'g31', name: '農民', rarity: 1, faction: FACTIONS.OTHER, atk: 15, int: 10, def: 20, troop: TROOP_TYPES.SHIELD, skill: '鍬の一撃' },
+];
+
+const MASTER_WEAPONS = [
+  { id: 'wp1', name: '打刀', atk: 15, int: 0, def: 5, rarity: 3, type: '刀', price: 3000 },
+  { id: 'wp2', name: '十文字槍', atk: 20, int: 0, def: 10, rarity: 4, type: '槍', price: 8000 },
+  { id: 'wp3', name: '種子島', atk: 30, int: 0, def: 0, rarity: 4, type: '鉄砲', price: 10000 },
+  { id: 'wp4', name: '名物・童子切安綱', atk: 50, int: 10, def: 20, rarity: 5, type: '刀', price: 20000 },
+  { id: 'wp5', name: '軍配団扇', atk: 5, int: 40, def: 15, rarity: 5, type: '軍配', price: 15000 },
+  { id: 'wp6', name: '国友筒', atk: 45, int: 0, def: 5, rarity: 4, type: '鉄砲', price: 15000 },
+  { id: 'wp7', name: '雑賀八汐筒', atk: 60, int: 5, def: 0, rarity: 5, type: '鉄砲', price: 25000 },
+  { id: 'wp8', name: '南蛮大筒', atk: 100, int: 0, def: -10, rarity: 5, type: '鉄砲', price: 40000 },
+];
+
+// --- 家紋描画コンポーネント ---
+const FactionKamon = ({ faction, className = "w-10 h-10" }) => {
+  const kamons = {
+    '織田': (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+        <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="6"/>
+        <circle cx="50" cy="50" r="15" fill="none" stroke="currentColor" strokeWidth="6"/>
+        <rect x="25" y="47" width="50" height="6" fill="currentColor" />
+        <rect x="47" y="25" width="6" height="50" fill="currentColor" />
+      </svg>
+    ),
+    '武田': (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+        <polygon points="50,15 65,30 50,45 35,30"/>
+        <polygon points="50,55 65,70 50,85 35,70"/>
+        <polygon points="25,35 40,50 25,65 10,50"/>
+        <polygon points="75,35 90,50 75,65 60,50"/>
+      </svg>
+    ),
+    '島津': (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+        <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="10"/>
+        <rect x="20" y="42" width="60" height="16" fill="currentColor"/>
+        <rect x="42" y="20" width="16" height="60" fill="currentColor"/>
+      </svg>
+    ),
+    '北条': (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+        <polygon points="50,15 70,50 30,50"/>
+        <polygon points="25,60 45,95 5,95"/>
+        <polygon points="75,60 95,95 55,95"/>
+      </svg>
+    ),
+    '毛利': (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+        <rect x="20" y="25" width="60" height="15" fill="currentColor"/>
+        <circle cx="25" cy="65" r="15"/>
+        <circle cx="50" cy="65" r="15"/>
+        <circle cx="75" cy="65" r="15"/>
+      </svg>
+    ),
+    '徳川': (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+        <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="5"/>
+        <path d="M50 50 C 30 10 70 10 50 50 Z" />
+        <path d="M50 50 C 10 40 20 80 50 50 Z" />
+        <path d="M50 50 C 90 40 80 80 50 50 Z" />
+      </svg>
+    ),
+    '伊達': (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+         <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="5"/>
+         <circle cx="50" cy="50" r="30" fill="none" stroke="currentColor" strokeWidth="3"/>
+         <circle cx="50" cy="50" r="15" fill="currentColor" />
+         <circle cx="30" cy="30" r="5" fill="currentColor" />
+         <circle cx="70" cy="30" r="5" fill="currentColor" />
+         <circle cx="30" cy="70" r="5" fill="currentColor" />
+         <circle cx="70" cy="70" r="5" fill="currentColor" />
+         <circle cx="50" cy="20" r="5" fill="currentColor" />
+         <circle cx="50" cy="80" r="5" fill="currentColor" />
+         <circle cx="20" cy="50" r="5" fill="currentColor" />
+         <circle cx="80" cy="50" r="5" fill="currentColor" />
+      </svg>
+    ),
+    '上杉': (
+      <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+        <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="5"/>
+        <polygon points="50,20 70,80 30,80" fill="none" stroke="currentColor" strokeWidth="5"/>
+        <circle cx="50" cy="55" r="15" fill="currentColor" />
+      </svg>
+    )
+  };
+
+  if (kamons[faction]) {
+    return kamons[faction];
+  }
+
+  return (
+    <svg viewBox="0 0 100 100" className={className} fill="currentColor">
+      <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="5"/>
+      <text x="50" y="66" fontSize="45" textAnchor="middle" fill="currentColor" fontWeight="bold" fontFamily="serif">{faction ? faction[0] : '群'}</text>
+    </svg>
+  );
+};
+
+// --- 史実に基づき、owner (支配勢力) を割り当てた城データ ---
+const INITIAL_LANDS = [
+  { id: 1, level: 1, name: '薩摩 (空き地)', power: 300, reward: 100, exp: 50, goldReward: 50, x: 21, y: 85, owner: '群', isPort: true },
+  { id: 2, level: 2, name: '肥前 (村落)', power: 800, reward: 300, exp: 150, goldReward: 150, x: 16, y: 76, owner: '龍造寺', isPort: true },
+  { id: 3, level: 3, name: '安芸 (砦)', power: 2000, reward: 800, exp: 400, goldReward: 400, x: 30, y: 68, owner: '毛利' },
+  { id: 11, level: 3, name: '出雲 (砦)', power: 2200, reward: 850, exp: 450, goldReward: 450, x: 28, y: 63, owner: '毛利' },
+  { id: 4, level: 4, name: '土佐 (支城)', power: 5000, reward: 2000, exp: 1000, goldReward: 1000, x: 36, y: 80, owner: '長宗我部', isPort: true },
+  { id: 5, level: 5, name: '播磨 (本城)', power: 12000, reward: 5000, exp: 3000, goldReward: 3000, x: 42, y: 67, owner: '織田', isPort: true },
+  { id: 12, level: 5, name: '大和 (本城)', power: 13000, reward: 5500, exp: 3200, goldReward: 3200, x: 50, y: 72, owner: '織田' },
+  { id: 18, level: 5, name: '加賀 (本城)', power: 14000, reward: 5800, exp: 3300, goldReward: 3300, x: 52, y: 55, owner: '上杉' },
+  { id: 16, level: 4, name: '美濃 (支城)', power: 5500, reward: 2200, exp: 1100, goldReward: 1100, x: 53, y: 63, owner: '織田' },
+  { id: 6, level: 6, name: '越前 (関所)', power: 25000, reward: 10000, exp: 6000, goldReward: 5000, x: 48, y: 59, owner: '朝倉' },
+  { id: 15, level: 6, name: '信濃 (関所)', power: 28000, reward: 11000, exp: 6500, goldReward: 5500, x: 59, y: 56, owner: '武田' },
+  { id: 7, level: 7, name: '尾張 (国府)', power: 50000, reward: 20000, exp: 10000, goldReward: 8000, x: 57, y: 64, owner: '織田' },
+  { id: 14, level: 7, name: '甲斐 (国府)', power: 55000, reward: 22000, exp: 11000, goldReward: 8500, x: 62, y: 60, owner: '武田' },
+  { id: 8, level: 8, name: '相模 (名城)', power: 90000, reward: 40000, exp: 18000, goldReward: 12000, x: 66, y: 62, owner: '北条', isPort: true },
+  { id: 13, level: 8, name: '越後 (名城)', power: 95000, reward: 42000, exp: 19000, goldReward: 13000, x: 62, y: 48, owner: '上杉', isPort: true },
+  { id: 9, level: 9, name: '陸奥 (大名居城)', power: 150000, reward: 80000, exp: 30000, goldReward: 20000, x: 74, y: 35, owner: '伊達' },
+  { id: 17, level: 9, name: '出羽 (大名居城)', power: 145000, reward: 78000, exp: 29000, goldReward: 19000, x: 70, y: 35, owner: '伊達' },
+  { id: 10, level: 10, name: '山城・二条城', power: 300000, reward: 200000, exp: 50000, goldReward: 50000, x: 47, y: 65, owner: '織田' },
+  { id: 19, level: 2, name: '蝦夷・館 (村落)', power: 900, reward: 350, exp: 180, goldReward: 180, x: 77, y: 14, owner: '群', isPort: true },
+  { id: 20, level: 4, name: '蝦夷・茂別館 (支城)', power: 6000, reward: 2500, exp: 1200, goldReward: 1200, x: 82, y: 11, owner: '群' },
+  { id: 21, level: 6, name: '蝦夷・勝山館 (関所)', power: 26000, reward: 10500, exp: 6200, goldReward: 5200, x: 88, y: 13, owner: '群' },
+  { id: 22, level: 3, name: '豊後 (砦)', power: 1800, reward: 700, exp: 350, goldReward: 350, x: 22, y: 73, owner: '大友', isPort: true },
+  { id: 23, level: 4, name: '肥後 (支城)', power: 4500, reward: 1800, exp: 900, goldReward: 900, x: 19, y: 79, owner: '島津' },
+  { id: 24, level: 3, name: '日向 (砦)', power: 2000, reward: 800, exp: 400, goldReward: 400, x: 23, y: 80, owner: '島津' },
+  { id: 25, level: 2, name: '長門 (村落)', power: 900, reward: 350, exp: 180, goldReward: 180, x: 26, y: 70, owner: '毛利', isPort: true },
+  { id: 26, level: 4, name: '備前 (支城)', power: 4000, reward: 1600, exp: 800, goldReward: 800, x: 36, y: 67, owner: '毛利', isPort: true },
+  { id: 27, level: 4, name: '讃岐 (支城)', power: 4200, reward: 1700, exp: 850, goldReward: 850, x: 37, y: 75, owner: '長宗我部' },
+  { id: 28, level: 4, name: '伊予 (支城)', power: 4600, reward: 1900, exp: 950, goldReward: 950, x: 33, y: 76, owner: '長宗我部', isPort: true },
+  { id: 29, level: 3, name: '伯耆 (砦)', power: 2300, reward: 900, exp: 450, goldReward: 450, x: 33, y: 64, owner: '毛利' },
+  { id: 30, level: 3, name: '紀伊 (砦)', power: 2500, reward: 1000, exp: 500, goldReward: 500, x: 48, y: 77, owner: '群' },
+  { id: 31, level: 5, name: '摂津 (本城)', power: 11000, reward: 4800, exp: 2800, goldReward: 2800, x: 44, y: 69, owner: '織田', isPort: true },
+  { id: 32, level: 6, name: '近江 (関所)', power: 24000, reward: 9500, exp: 5500, goldReward: 4500, x: 49, y: 64, owner: '浅井' },
+  { id: 33, level: 3, name: '伊賀 (砦)', power: 2800, reward: 1100, exp: 550, goldReward: 550, x: 51, y: 68, owner: '群' },
+  { id: 34, level: 5, name: '駿河 (本城)', power: 14500, reward: 6000, exp: 3500, goldReward: 3500, x: 61, y: 64, owner: '今川', isPort: true },
+  { id: 35, level: 4, name: '遠江 (支城)', power: 6500, reward: 2800, exp: 1400, goldReward: 1400, x: 59, y: 66, owner: '徳川' },
+  { id: 36, level: 4, name: '三河 (支城)', power: 6000, reward: 2600, exp: 1300, goldReward: 1300, x: 56, y: 67, owner: '徳川' },
+  { id: 37, level: 3, name: '能登 (砦)', power: 2200, reward: 850, exp: 450, goldReward: 450, x: 53, y: 51, owner: '上杉' },
+  { id: 38, level: 4, name: '越中 (支城)', power: 5000, reward: 2000, exp: 1000, goldReward: 1000, x: 56, y: 52, owner: '上杉' },
+  { id: 39, level: 3, name: '飛騨 (砦)', power: 2400, reward: 950, exp: 480, goldReward: 480, x: 56, y: 58, owner: '武田' },
+  { id: 40, level: 7, name: '武蔵 (国府)', power: 52000, reward: 21000, exp: 10500, goldReward: 8200, x: 65, y: 60, owner: '北条' },
+  { id: 41, level: 5, name: '常陸 (本城)', power: 15000, reward: 6500, exp: 3800, goldReward: 3800, x: 70, y: 58, owner: '北条', isPort: true },
+  { id: 42, level: 4, name: '下総 (支城)', power: 7000, reward: 3000, exp: 1500, goldReward: 1500, x: 68, y: 62, owner: '北条' },
+  { id: 43, level: 5, name: '上野 (本城)', power: 13000, reward: 5500, exp: 3200, goldReward: 3200, x: 63, y: 57, owner: '北条' },
+  { id: 44, level: 4, name: '磐城 (支城)', power: 6000, reward: 2500, exp: 1200, goldReward: 1200, x: 72, y: 46, owner: '伊達' },
+  { id: 45, level: 6, name: '陸中 (関所)', power: 26000, reward: 10500, exp: 6200, goldReward: 5200, x: 75, y: 30, owner: '伊達' },
+  { id: 46, level: 5, name: '陸前 (本城)', power: 16000, reward: 6800, exp: 4000, goldReward: 4000, x: 76, y: 40, owner: '伊達', isPort: true },
+  { id: 47, level: 4, name: '石見 (支城)', power: 4800, reward: 1900, exp: 950, goldReward: 950, x: 26, y: 66, owner: '毛利', isPort: true },
+  { id: 48, level: 3, name: '但馬 (砦)', power: 2100, reward: 850, exp: 450, goldReward: 450, x: 38, y: 63, owner: '毛利' },
+  { id: 49, level: 2, name: '因幡 (村落)', power: 850, reward: 320, exp: 160, goldReward: 160, x: 35, y: 63, owner: '毛利' },
+  { id: 50, level: 4, name: '下野 (支城)', power: 5200, reward: 2100, exp: 1050, goldReward: 1050, x: 66, y: 57, owner: '北条' },
+  { id: 51, level: 3, name: '安房 (砦)', power: 1900, reward: 750, exp: 380, goldReward: 380, x: 69, y: 65, owner: '北条' },
+  { id: 52, level: 4, name: '羽前 (支城)', power: 5500, reward: 2200, exp: 1100, goldReward: 1100, x: 68, y: 42, owner: '伊達' },
+  { id: 53, level: 3, name: '岩代 (砦)', power: 2400, reward: 950, exp: 480, goldReward: 480, x: 73, y: 43, owner: '伊達' },
+  { id: 54, level: 4, name: '陸奥・三戸 (支城)', power: 6000, reward: 2500, exp: 1200, goldReward: 1200, x: 76, y: 25, owner: '伊達' },
+  { id: 55, level: 3, name: '伊勢 (砦)', power: 2500, reward: 1000, exp: 500, goldReward: 500, x: 53, y: 70, owner: '織田' },
+  { id: 56, level: 2, name: '志摩 (村落)', power: 1000, reward: 400, exp: 200, goldReward: 200, x: 55, y: 72, owner: '織田' },
+  { id: 57, level: 3, name: '河内 (砦)', power: 2600, reward: 1050, exp: 520, goldReward: 520, x: 47, y: 71, owner: '織田' },
+  { id: 58, level: 2, name: '和泉 (村落)', power: 1200, reward: 450, exp: 250, goldReward: 250, x: 45, y: 73, owner: '織田' },
+  { id: 59, level: 4, name: '丹波 (支城)', power: 4500, reward: 1800, exp: 900, goldReward: 900, x: 44, y: 65, owner: '織田' },
+  { id: 60, level: 3, name: '丹後 (砦)', power: 2200, reward: 850, exp: 450, goldReward: 450, x: 45, y: 62, owner: '織田' },
+  { id: 61, level: 2, name: '若狭 (村落)', power: 900, reward: 350, exp: 180, goldReward: 180, x: 48, y: 62, owner: '朝倉' },
+  { id: 62, level: 4, name: '阿波 (支城)', power: 4200, reward: 1700, exp: 850, goldReward: 850, x: 40, y: 76, owner: '長宗我部' },
+  { id: 63, level: 3, name: '備中 (砦)', power: 2300, reward: 900, exp: 450, goldReward: 450, x: 34, y: 68, owner: '毛利' },
+  { id: 64, level: 4, name: '備後 (支城)', power: 4800, reward: 1900, exp: 950, goldReward: 950, x: 32, y: 68, owner: '毛利' },
+  { id: 65, level: 3, name: '美作 (砦)', power: 2400, reward: 950, exp: 480, goldReward: 480, x: 35, y: 65, owner: '毛利' },
+  { id: 66, level: 4, name: '周防 (支城)', power: 5000, reward: 2000, exp: 1000, goldReward: 1000, x: 27, y: 71, owner: '毛利' },
+  { id: 67, level: 5, name: '筑前 (本城)', power: 12500, reward: 5200, exp: 3100, goldReward: 3100, x: 18, y: 73, owner: '大友', isPort: true },
+  { id: 68, level: 3, name: '筑後 (砦)', power: 2700, reward: 1100, exp: 550, goldReward: 550, x: 18, y: 75, owner: '龍造寺' },
+  { id: 69, level: 4, name: '豊前 (支城)', power: 5500, reward: 2200, exp: 1100, goldReward: 1100, x: 21, y: 72, owner: '大友' },
+  { id: 70, level: 2, name: '大隅 (村落)', power: 1100, reward: 400, exp: 200, goldReward: 200, x: 23, y: 84, owner: '島津' },
+  { id: 71, level: 3, name: '上総 (砦)', power: 2000, reward: 800, exp: 400, goldReward: 400, x: 69, y: 63, owner: '北条' },
+  { id: 72, level: 6, name: '対馬 (関所)', power: 22000, reward: 9000, exp: 5000, goldReward: 4500, x: 11, y: 70, owner: '群', isPort: true },
+  { id: 73, level: 8, name: '琉球 (名城)', power: 85000, reward: 38000, exp: 17000, goldReward: 11000, x: 8, y: 95, owner: '群', isPort: true },
+  { id: 74, level: 7, name: '蝦夷・根室 (国府)', power: 48000, reward: 19000, exp: 9500, goldReward: 7500, x: 94, y: 8, owner: '群' },
+  { id: 75, level: 5, name: '羽後 (本城)', power: 15000, reward: 6500, exp: 3500, goldReward: 3500, x: 68, y: 30, owner: '伊達' },
+  { id: 76, level: 3, name: '下野・北 (砦)', power: 2500, reward: 1000, exp: 500, goldReward: 500, x: 67, y: 53, owner: '北条' },
+  { id: 77, level: 3, name: '上野・北 (砦)', power: 2400, reward: 950, exp: 480, goldReward: 480, x: 64, y: 53, owner: '上杉' },
+  { id: 78, level: 2, name: '常陸・北 (村落)', power: 1000, reward: 400, exp: 200, goldReward: 200, x: 71, y: 54, owner: '伊達' },
+  { id: 79, level: 3, name: '磐城・南 (砦)', power: 2600, reward: 1050, exp: 520, goldReward: 520, x: 70, y: 50, owner: '伊達' },
+  { id: 80, level: 4, name: '岩代・西 (支城)', power: 5000, reward: 2000, exp: 1000, goldReward: 1000, x: 66, y: 46, owner: '伊達' },
+];
+
+const ROUTE_CONNECTIONS = [
+  // --- メインルート ---
+  [1, 23], [1, 24], [23, 22], [23, 2], [24, 22], [2, 25], [22, 28],
+  [25, 3], [25, 11], [11, 29], [3, 26], [29, 26], [26, 5], [29, 5],
+  [28, 4], [28, 27], [4, 27], [27, 31], [5, 31],
+  [31, 10], [31, 30], [10, 32], [10, 12], [12, 33], [12, 30], [30, 33],
+  [33, 7], [32, 16], [32, 6], [6, 18], [18, 37], [18, 38],
+  [38, 13], [38, 39], [16, 39], [16, 7], [7, 36], [36, 35],
+  [35, 34], [35, 15], [34, 14], [34, 8], [14, 15], [15, 13], [15, 43],
+  [14, 40], [8, 40], [8, 42], [40, 43], [40, 42], [43, 13], [42, 41],
+  [41, 44], [13, 17], [17, 9], [44, 46], [46, 9], [9, 45],
+  [19, 20], [20, 21], [21, 74], 
+  [13, 52], [52, 17], [44, 53], [53, 46], [53, 52], [45, 54], [54, 19],
+  [40, 50], [43, 50], [50, 41], [42, 51], [71, 42], [71, 51],
+  [25, 47], [47, 11], [29, 49], [49, 48], [48, 5],
+  [59, 10], [59, 5], [59, 60], [60, 48], [60, 61], [61, 6],
+  [57, 31], [57, 12], [57, 58], [58, 30],
+  [63, 26], [63, 64], [63, 65], [65, 49], [64, 3],
+  [66, 3], [66, 25],
+  [62, 27], [62, 4],
+  [67, 25], [67, 68], [67, 69], [68, 2], [68, 23], [69, 22],
+  [70, 24], [70, 1],
+  [55, 33], [55, 7], [56, 55],
+  [72, 2], [73, 1],
+  [75, 17], [75, 52],
+  [76, 50], [76, 79],
+  [77, 43], [77, 80], [77, 13],
+  [78, 41], [78, 44],
+  [79, 44], [79, 78], [79, 76],
+  [80, 53], [80, 13], [80, 77]
+];
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('map');
+  const [showCastleList, setShowCastleList] = useState(true);
+  const [gold, setGold] = useState(20000); 
+  const [copper, setCopper] = useState(25000);
+  const [hasNavy, setHasNavy] = useState(false);
+  
+  // --- 🌟 外交（同盟）および 居城 ステータス ---
+  const [diplomacyRelations, setDiplomacyRelations] = useState({});
+  const [capitalLandId, setCapitalLandId] = useState(null);
+
+  // --- 領地の状態管理 ---
+  const [LANDS, setLANDS] = useState(INITIAL_LANDS);
+
+  const [inventory, setInventory] = useState({ tactics: 5, drum: 3, hora: 2 }); 
+  const [activeBuff, setActiveBuff] = useState(null);
+  const [showItemModal, setShowItemModal] = useState(null);
+  const [inventoryWeapons, setInventoryWeapons] = useState({ 'wp1': 2, 'wp2': 1, 'wp3': 1 });
+  const [equippedWeapons, setEquippedWeapons] = useState({});
+  const [showWeaponModalFor, setShowWeaponModalFor] = useState(null);
+  const [merchantEvent, setMerchantEvent] = useState(null);
+
+  const [filterFaction, setFilterFaction] = useState('ALL'); 
+  const [ownedGenerals, setOwnedGenerals] = useState([]);
+  
+  const [decks, setDecks] = useState([
+    [null, null, null, null, null],
+    [null, null, null, null, null],
+    [null, null, null, null, null],
+  ]);
+  const [activeDeckIndex, setActiveDeckIndex] = useState(0); 
+  const [selectedDeckForBattle, setSelectedDeckForBattle] = useState(0); 
+  
+  const [occupiedLands, setOccupiedLands] = useState([]);
+  const [battlingLandId, setBattlingLandId] = useState(null);
+  const [selectedLand, setSelectedLand] = useState(null); 
+  const [battleScene, setBattleScene] = useState(null);
+  const mapContainerRef = useRef(null);
+  const [gachaResult, setGachaResult] = useState(null);
+  
+  const [isGameClear, setIsGameClear] = useState(false);
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
+  const [dragDistance, setDragDistance] = useState(0);
+
+  const [chatMessages, setChatMessages] = useState([
+    { id: 'm1', sender: '柴田権六', text: '御館様、よろしくお頼み申す！', isSelf: false },
+    { id: 'm2', sender: '木下藤吉郎', text: 'ははっ！微力ながら尽力いたしまする！', isSelf: false }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef(null);
+  const [taxCooldown, setTaxCooldown] = useState(0);
+  const [ikkiEvent, setIkkiEvent] = useState(null); 
+
+  const [invasionEvent, setInvasionEvent] = useState(null);
+
+  const [allianceInfo, setAllianceInfo] = useState({
+    name: '天下布武の会',
+    level: 3,
+    exp: 1500,
+    maxExp: 5000,
+    members: [
+      { name: '御館様 (あなた)', power: 0, role: '盟主' },
+      { name: '柴田権六', power: 10500, role: '副盟主' },
+      { name: '木下藤吉郎', power: 8900, role: '構成員' },
+    ],
+    logs: [
+      '木下藤吉郎が同盟に加入しました。',
+      '柴田権六が1000銅銭を寄付しました。'
+    ]
+  });
+
+  const [logs, setLogs] = useState([{ id: 'init', text: 'いざ出陣じゃ！まずは上の「出陣」タブから地図上の土地を選び、出陣ボタンを押すのだ。', type: 'system' }]);
+  const logsEndRef = useRef(null);
+  const [advisorQuery, setAdvisorQuery] = useState('');
+  const [advisorResponse, setAdvisorResponse] = useState('');
+  const [isConsulting, setIsConsulting] = useState(false);
+  const [isBgmPlaying, setIsBgmPlaying] = useState(false);
+  const [bgmVolume, setBgmVolume] = useState(0.1); 
+  const audioRef = useRef(null);
+
+  const [mapScale, setMapScale] = useState(0.4);
+
+  const isReachable = (landId) => {
+    if (occupiedLands.includes(landId)) return true;
+    if (occupiedLands.length === 0) return landId === 1;
+
+    if (hasNavy) {
+      const targetLand = LANDS.find(l => l.id === landId);
+      if (targetLand?.isPort) {
+        // 自軍が1つでも「港」を占領しているか、同盟国が港を持っているか
+        const hasBasePort = occupiedLands.some(id => LANDS.find(l => l.id === id)?.isPort) || 
+                            LANDS.some(l => l.isPort && diplomacyRelations[l.owner] === 'alliance');
+        if (hasBasePort) return true;
+      }
+    }
+
+    // 陸路接続の判定（同盟国の領地も自軍領地のように通過可能）
+    return ROUTE_CONNECTIONS.some(([a, b]) => {
+      if (a === landId) {
+        const landB = LANDS.find(l => l.id === b);
+        return occupiedLands.includes(b) || diplomacyRelations[landB?.owner] === 'alliance';
+      }
+      if (b === landId) {
+        const landA = LANDS.find(l => l.id === a);
+        return occupiedLands.includes(a) || diplomacyRelations[landA?.owner] === 'alliance';
+      }
+      return false;
+    });
+  };
+
+  const handleZoom = (newScale) => {
+    if (!mapContainerRef.current) {
+      setMapScale(newScale);
+      return;
+    }
+    const container = mapContainerRef.current;
+    
+    const centerX = (container.scrollLeft + container.clientWidth / 2) / (12800 * mapScale);
+    const centerY = (container.scrollTop + container.clientHeight / 2) / (9600 * mapScale);
+
+    setMapScale(newScale);
+
+    setTimeout(() => {
+      if (!mapContainerRef.current) return;
+      const newScrollLeft = (12800 * newScale) * centerX - container.clientWidth / 2;
+      const newScrollTop = (9600 * newScale) * centerY - container.clientHeight / 2;
+      
+      container.scrollLeft = newScrollLeft;
+      container.scrollTop = newScrollTop;
+    }, 0);
+  };
+
+  const handleZoomIn = () => handleZoom(Math.min(mapScale + 0.1, 2.0));
+  const handleZoomOut = () => handleZoom(Math.max(mapScale - 0.1, 0.1));
+
+  const handleMapMouseDown = (e) => {
+    if (!mapContainerRef.current) return;
+    setIsDragging(true);
+    setDragStart({
+      x: e.pageX,
+      y: e.pageY,
+      scrollLeft: mapContainerRef.current.scrollLeft,
+      scrollTop: mapContainerRef.current.scrollTop,
+    });
+    setDragDistance(0);
+  };
+
+  const handleMapMouseMove = (e) => {
+    if (!isDragging || !mapContainerRef.current) return;
+    e.preventDefault(); 
+    const x = e.pageX;
+    const y = e.pageY;
+    const dx = x - dragStart.x;
+    const dy = y - dragStart.y;
+    mapContainerRef.current.scrollLeft = dragStart.scrollLeft - dx;
+    mapContainerRef.current.scrollTop = dragStart.scrollTop - dy;
+    setDragDistance(prev => prev + Math.abs(dx) + Math.abs(dy));
+  };
+
+  const handleMapMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleCastleClick = (land) => {
+    if (dragDistance > 10) return; 
+    setSelectedLand(land);
+  };
+
+  const jumpToCastle = (land) => {
+    setSelectedLand(land);
+    if (mapContainerRef.current) {
+      const container = mapContainerRef.current;
+      const targetX = 12800 * mapScale * (land.x / 100);
+      const targetY = 9600 * mapScale * (land.y / 100);
+      container.scrollTo({
+        left: targetX - container.clientWidth / 2,
+        top: targetY - container.clientHeight / 2,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  const [user, setUser] = useState(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const isInitialized = useRef(false);
+  const prevDestroyedFactions = useRef([]);
+  const isInitialOccupiedCheck = useRef(true);
+
+  useEffect(() => {
+    if (!auth) return;
+    let isMounted = true;
+    const initAuth = async () => {
+      try {
+        if (typeof window !== 'undefined' && window.__initial_auth_token) {
+          await signInWithCustomToken(auth, window.__initial_auth_token);
+        } else if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (e) {
+        console.error("Auth error", e);
+      }
+    };
+    initAuth();
+    
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      if (isMounted) setUser(u);
+    });
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!app || !auth || !db) {
+       if (isInitialized.current) return;
+       isInitialized.current = true;
+       const initGeneral = { ...MASTER_GENERALS.find(g => g.id === 'g10'), uniqueId: generateId(), level: 1, currentExp: 0, breakthrough: 0 };
+       const initPeasant = { ...MASTER_GENERALS.find(g => g.id === 'g31'), uniqueId: generateId(), level: 1, currentExp: 0, breakthrough: 0 };
+       setOwnedGenerals([initGeneral, initPeasant]);
+       setDecks([
+         [initGeneral.uniqueId, initPeasant.uniqueId, null, null, null],
+         [null, null, null, null, null],
+         [null, null, null, null, null]
+       ]);
+       setDataLoaded(true);
+       return;
+    }
+
+    if (!user || dataLoaded) return;
+    
+    const loadData = async () => {
+      try {
+        const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'saveData', 'main');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.gold !== undefined) setGold(data.gold);
+          if (data.copper !== undefined) setCopper(data.copper);
+          if (data.inventory) setInventory(data.inventory);
+          if (data.inventoryWeapons) setInventoryWeapons(data.inventoryWeapons);
+          if (data.equippedWeapons) setEquippedWeapons(data.equippedWeapons);
+          if (data.ownedGenerals) setOwnedGenerals(data.ownedGenerals);
+          if (data.occupiedLands) setOccupiedLands(data.occupiedLands);
+          if (data.allianceInfo) setAllianceInfo(data.allianceInfo);
+          if (data.hasNavy !== undefined) setHasNavy(data.hasNavy);
+          if (data.diplomacyRelations) setDiplomacyRelations(data.diplomacyRelations);
+          if (data.LANDS) setLANDS(data.LANDS);
+          if (data.capitalLandId !== undefined) setCapitalLandId(data.capitalLandId);
+          
+          if (data.decks) {
+            try {
+              setDecks(typeof data.decks === 'string' ? JSON.parse(data.decks) : data.decks);
+            } catch (e) {
+              console.error("Failed to parse decks", e);
+            }
+          } else if (data.deckIds) {
+            setDecks([
+              [...(data.deckIds || []), null, null].slice(0, 5),
+              [null, null, null, null, null],
+              [null, null, null, null, null]
+            ]);
+          }
+          addLog("以前の記録（セーブデータ）を復元いたしました。", "system");
+        } else {
+          const initGeneral = { ...MASTER_GENERALS.find(g => g.id === 'g10'), uniqueId: generateId(), level: 1, currentExp: 0, breakthrough: 0 };
+          const initPeasant = { ...MASTER_GENERALS.find(g => g.id === 'g31'), uniqueId: generateId(), level: 1, currentExp: 0, breakthrough: 0 };
+          setOwnedGenerals([initGeneral, initPeasant]);
+          setDecks([
+            [initGeneral.uniqueId, initPeasant.uniqueId, null, null, null],
+            [null, null, null, null, null],
+            [null, null, null, null, null]
+          ]);
+          setOccupiedLands([]); 
+        }
+      } catch (e) {
+        console.error("Load error", e);
+        const initGeneral = { ...MASTER_GENERALS.find(g => g.id === 'g10'), uniqueId: generateId(), level: 1, currentExp: 0, breakthrough: 0 };
+        setOwnedGenerals([initGeneral]);
+        setDecks([
+          [initGeneral.uniqueId, null, null, null, null],
+          [null, null, null, null, null],
+          [null, null, null, null, null]
+        ]);
+        setOccupiedLands([]); 
+      } finally {
+        setDataLoaded(true);
+      }
+    };
+    loadData();
+  }, [user, dataLoaded]);
+
+  // 初占領時の居城自動設定
+  useEffect(() => {
+    if (dataLoaded && occupiedLands.length > 0 && !capitalLandId) {
+      setCapitalLandId(occupiedLands[0]);
+      const initialLandName = LANDS.find(l => l.id === occupiedLands[0])?.name;
+      addLog(`【立志】${initialLandName}を本拠地（居城）と定めました！ここを奪われると滅亡します。`, 'rare');
+    }
+  }, [occupiedLands, capitalLandId, dataLoaded, LANDS]);
+
+  // 一家滅亡による確定侵略イベントの処理
+  useEffect(() => {
+    if (!dataLoaded) return;
+    
+    const factionLandCounts = {};
+    LANDS.forEach(l => {
+      if (l.owner !== '群') {
+        factionLandCounts[l.owner] = (factionLandCounts[l.owner] || 0) + 1;
+      }
+    });
+
+    const currentDestroyed = [];
+    Object.keys(factionLandCounts).forEach(faction => {
+      const landsOfFaction = LANDS.filter(l => l.owner === faction);
+      if (landsOfFaction.length > 0 && landsOfFaction.every(l => occupiedLands.includes(l.id))) {
+        currentDestroyed.push(faction);
+      }
+    });
+
+    if (isInitialOccupiedCheck.current) {
+      prevDestroyedFactions.current = currentDestroyed;
+      isInitialOccupiedCheck.current = false;
+      return;
+    }
+
+    const newlyDestroyed = currentDestroyed.filter(f => !prevDestroyedFactions.current.includes(f));
+    
+    if (newlyDestroyed.length > 0) {
+      newlyDestroyed.forEach(faction => {
+        addLog(`【勢力滅亡】我が軍の猛攻により、${faction}家は滅亡いたしました！`, 'rare');
+        
+        // 滅亡した勢力との同盟関係をクリア
+        setDiplomacyRelations(prev => {
+           const next = {...prev};
+           delete next[faction];
+           return next;
+        });
+
+        const ruinedLands = LANDS.filter(l => l.owner === faction);
+        const adjacentUnoccupiedLands = [];
+        
+        ruinedLands.forEach(rl => {
+          // 陸路
+          ROUTE_CONNECTIONS.forEach(([a, b]) => {
+            let adjId = null;
+            if (a === rl.id) adjId = b;
+            else if (b === rl.id) adjId = a;
+            
+            if (adjId && !occupiedLands.includes(adjId)) {
+              const adjLand = LANDS.find(l => l.id === adjId);
+              // 同盟国でない勢力のみが報復してくる
+              if (adjLand && adjLand.owner !== '群' && diplomacyRelations[adjLand.owner] !== 'alliance') {
+                adjacentUnoccupiedLands.push({ ruinedLand: rl, adjLand, isNavyAttack: false });
+              }
+            }
+          });
+          
+          // 海路
+          if (rl.isPort) {
+            LANDS.forEach(l => {
+              if (l.isPort && l.id !== rl.id && !occupiedLands.includes(l.id)) {
+                if (l.owner !== '群' && diplomacyRelations[l.owner] !== 'alliance') {
+                  adjacentUnoccupiedLands.push({ ruinedLand: rl, adjLand: l, isNavyAttack: true });
+                }
+              }
+            });
+          }
+        });
+
+        if (adjacentUnoccupiedLands.length > 0) {
+          const invasionRoute = adjacentUnoccupiedLands[Math.floor(Math.random() * adjacentUnoccupiedLands.length)];
+          const invaderFaction = invasionRoute.adjLand.owner;
+          
+          setTimeout(() => {
+            if (Math.random() < 0.50) {
+              setInvasionEvent({
+                land: invasionRoute.ruinedLand,
+                enemyName: invasionRoute.isNavyAttack ? `${invaderFaction}水軍` : `${invaderFaction}軍`,
+                enemyPower: Math.floor(invasionRoute.adjLand.power * 1.5),
+                isNavyAttack: invasionRoute.isNavyAttack
+              });
+              
+              if (invasionRoute.isNavyAttack) {
+                 addLog(`【海路急報】${faction}家の旧領に生じた隙を突き、海を渡って${invaderFaction}水軍が ${invasionRoute.ruinedLand.name} へ奇襲を開始しました！`, 'error');
+              } else {
+                 addLog(`【急報】${faction}家の旧領に生じた隙を突き、隣接する${invaderFaction}軍が ${invasionRoute.ruinedLand.name} へ侵攻を開始しました！`, 'error');
+              }
+            } else {
+              addLog(`【偵察】${faction}家滅亡の報を受け、隣接する${invaderFaction}軍が様子を窺っているようです。`, 'warning');
+            }
+          }, 10000);
+        }
+      });
+      prevDestroyedFactions.current = currentDestroyed;
+    }
+  }, [occupiedLands, dataLoaded, diplomacyRelations, LANDS]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = bgmVolume;
+    }
+  }, [bgmVolume]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  const toggleBgm = () => {
+    if (!audioRef.current) {
+      audioRef.current = new Audio('https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3'); 
+      audioRef.current.loop = true;
+      audioRef.current.volume = bgmVolume;
+      audioRef.current.onerror = () => {
+        setIsBgmPlaying(false);
+        addLog("BGMの読み込みに失敗いたしました。（通信状況やブラウザの制限の可能性があります）", "error");
+      };
+    }
+
+    if (!isBgmPlaying) {
+      const playPromise = audioRef.current.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          setIsBgmPlaying(true);
+        }).catch(() => {
+          setIsBgmPlaying(false);
+          addLog("ブラウザの制限によりBGMを再生できませんでした。", "error");
+        });
+      }
+    } else {
+      audioRef.current.pause();
+      setIsBgmPlaying(false);
+    }
+  };
+
+  useEffect(() => {
+    let timer;
+    if (taxCooldown > 0) {
+      timer = setInterval(() => {
+        setTaxCooldown(prev => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [taxCooldown]);
+
+  // ランダム侵略イベント（高頻度）
+  useEffect(() => {
+    if (!dataLoaded || occupiedLands.length === 0) return;
+    
+    // 一家制圧済みかどうかの判定
+    const factionLandCounts = {};
+    LANDS.forEach(l => {
+      if (l.owner !== '群') {
+        factionLandCounts[l.owner] = (factionLandCounts[l.owner] || 0) + 1;
+      }
+    });
+    let hasDestroyedFaction = false;
+    Object.keys(factionLandCounts).forEach(faction => {
+      const landsOfFaction = LANDS.filter(l => l.owner === faction);
+      if (landsOfFaction.length > 0 && landsOfFaction.every(l => occupiedLands.includes(l.id))) {
+        hasDestroyedFaction = true;
+      }
+    });
+
+    const checkInvasion = () => {
+      // 一家制圧後は 50%、それまでは 20%
+      const prob = hasDestroyedFaction ? 0.50 : 0.20;
+
+      if (Math.random() < prob && !battleScene && !invasionEvent && !ikkiEvent && !gachaResult && !merchantEvent) {
+         const targetLandId = occupiedLands[Math.floor(Math.random() * occupiedLands.length)];
+         const land = LANDS.find(l => l.id === targetLandId);
+         if (!land) return;
+
+         // 自領地に隣接する未占領かつ「同盟していない」領地を探す
+         const adjLands = [];
+         // --- 陸路 ---
+         ROUTE_CONNECTIONS.forEach(([a, b]) => {
+           let adjId = null;
+           if (a === land.id) adjId = b;
+           else if (b === land.id) adjId = a;
+           if (adjId && !occupiedLands.includes(adjId)) {
+             const adjLand = LANDS.find(l => l.id === adjId);
+             if (adjLand && diplomacyRelations[adjLand.owner] !== 'alliance') {
+               adjLands.push({ land: adjLand, isNavyAttack: false });
+             }
+           }
+         });
+         
+         // --- 海路 ---
+         if (land.isPort) {
+           LANDS.forEach(l => {
+             if (l.isPort && l.id !== land.id && !occupiedLands.includes(l.id)) {
+               if (diplomacyRelations[l.owner] !== 'alliance') {
+                 adjLands.push({ land: l, isNavyAttack: true });
+               }
+             }
+           });
+         }
+
+         let enemyName = '';
+         let enemyPower = 0;
+         let isNavyAttack = false;
+
+         if (adjLands.length > 0) {
+           const invasionInfo = adjLands[Math.floor(Math.random() * adjLands.length)];
+           const invadingLand = invasionInfo.land;
+           isNavyAttack = invasionInfo.isNavyAttack;
+
+           enemyName = invadingLand.owner === '群' ? '野盗・一揆衆' : `${invadingLand.owner}軍`;
+           if (isNavyAttack) {
+             enemyName = invadingLand.owner === '群' ? '海賊衆・水軍' : `${invadingLand.owner}水軍`;
+           }
+           enemyPower = Math.floor(invadingLand.power * (0.8 + Math.random() * 0.4));
+         } else {
+           const enemyNames = ['野盗の大群', '謎の武装集団', '浪人衆'];
+           enemyName = enemyNames[Math.floor(Math.random() * enemyNames.length)];
+           enemyPower = Math.floor(land.power * (1.0 + Math.random() * 0.8)); 
+         }
+         
+         setInvasionEvent({ land, enemyName, enemyPower, isNavyAttack });
+         
+         if (isNavyAttack) {
+           addLog(`【海路急報】海を渡り、${enemyName}が我が領地「${land.name}」の港へ奇襲を仕掛けてきました！`, 'error');
+         } else {
+           addLog(`【急報】${enemyName}が我が領地「${land.name}」へ侵攻を開始しました！防衛網を敷いてください！`, 'error');
+         }
+      }
+    };
+
+    // 一家制圧後は 10秒間隔、それまでは 20秒間隔
+    const intervalTime = hasDestroyedFaction ? 10000 : 20000;
+    const interval = setInterval(checkInvasion, intervalTime);
+    return () => clearInterval(interval);
+  }, [dataLoaded, occupiedLands, battleScene, invasionEvent, ikkiEvent, gachaResult, merchantEvent, diplomacyRelations, LANDS]);
+
+  const handleSave = async () => {
+    if (!user || !db) {
+       addLog("通信環境が整っておらず、記録できませぬ。", "error");
+       return;
+    }
+    setIsSaving(true);
+    addLog("状況を記帳しております...", "system");
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'saveData', 'main');
+      await setDoc(docRef, {
+        gold,
+        copper,
+        inventory,
+        inventoryWeapons,
+        equippedWeapons,
+        ownedGenerals,
+        decks: JSON.stringify(decks),
+        occupiedLands,
+        allianceInfo,
+        hasNavy,
+        diplomacyRelations,
+        LANDS,
+        capitalLandId,
+        updatedAt: new Date().toISOString()
+      });
+      addLog("現在の状況をしっかりと記帳いたしました。（セーブ完了）", "success");
+    } catch (e) {
+      console.error("Save error", e);
+      addLog("記帳に失敗いたしました。", "error");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const executeReset = async () => {
+    // Firebaseのデータを空にして上書き
+    if (user && db) {
+      try {
+        const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'saveData', 'main');
+        await setDoc(docRef, { updatedAt: new Date().toISOString() });
+      } catch (e) {
+        console.error("Reset error", e);
+      }
+    }
+    
+    // 全ステートを初期値にリセット
+    setGold(20000);
+    setCopper(25000);
+    setHasNavy(false);
+    setDiplomacyRelations({});
+    setCapitalLandId(null);
+    setLANDS(INITIAL_LANDS);
+    setInventory({ tactics: 5, drum: 3, hora: 2 });
+    setInventoryWeapons({ 'wp1': 2, 'wp2': 1, 'wp3': 1 });
+    setEquippedWeapons({});
+    
+    const initGeneral = { ...MASTER_GENERALS.find(g => g.id === 'g10'), uniqueId: generateId(), level: 1, currentExp: 0, breakthrough: 0 };
+    const initPeasant = { ...MASTER_GENERALS.find(g => g.id === 'g31'), uniqueId: generateId(), level: 1, currentExp: 0, breakthrough: 0 };
+    setOwnedGenerals([initGeneral, initPeasant]);
+    setDecks([[initGeneral.uniqueId, initPeasant.uniqueId, null, null, null], [null, null, null, null, null], [null, null, null, null, null]]);
+    setOccupiedLands([]); setLogs([{ id: generateId(), text: '時を巻き戻し、新たな歴史が幕を開けた。いざ出陣じゃ！', type: 'system' }]);
+    setBattleScene(null); setInvasionEvent(null); setIkkiEvent(null); setMerchantEvent(null); setIsGameOver(false); setIsGameClear(false); setActiveTab('map'); setShowResetModal(false); setMapScale(0.4);
+  };
+
+  const negotiateAlliance = (faction) => {
+    if (gold < 1000 || copper < 20000) {
+        addLog("外交には小判1,000と銅銭20,000が必要じゃ！", "error");
+        return;
+    }
+    setGold(prev => prev - 1000);
+    setCopper(prev => prev - 20000);
+    
+    if (Math.random() < 0.8) { // 80%の確率で成功
+        setDiplomacyRelations(prev => ({ ...prev, [faction]: 'alliance' }));
+        addLog(`【外交成功】${faction}と同盟を結んだ！これにより${faction}の領地を通過でき、攻め込まれることもない。`, "rare");
+    } else {
+        addLog(`【外交失敗】${faction}との同盟交渉は決裂した…。貢物は持ち去られてしまった。`, "error");
+    }
+  };
+
+  const breakAlliance = (faction) => {
+    setDiplomacyRelations(prev => {
+        const next = { ...prev };
+        delete next[faction];
+        return next;
+    });
+    addLog(`【外交破棄】${faction}との同盟を破棄した！信を失ったため、直後に報復されるやもしれぬ…`, "error");
+    
+    // 報復イベント
+    setTimeout(() => {
+        if (Math.random() < 0.8) { // 80%の確率で怒って攻めてくる
+            const enemyLands = LANDS.filter(l => l.owner === faction && !occupiedLands.includes(l.id));
+            if (enemyLands.length > 0) {
+                const myLands = occupiedLands.map(id => LANDS.find(l => l.id === id));
+                if (myLands.length > 0) {
+                    // 狙われる自軍の領地を探す
+                    let targetInfo = null;
+                    const possibleTargets = [];
+                    myLands.forEach(myLand => {
+                       enemyLands.forEach(enemyLand => {
+                         const isLandConnected = ROUTE_CONNECTIONS.some(([a, b]) => (a === myLand.id && b === enemyLand.id) || (b === myLand.id && a === enemyLand.id));
+                         if (isLandConnected) {
+                           possibleTargets.push({ land: myLand, enemyLand, isNavyAttack: false });
+                         } else if (myLand.isPort && enemyLand.isPort) {
+                           possibleTargets.push({ land: myLand, enemyLand, isNavyAttack: true });
+                         }
+                       });
+                    });
+
+                    let selectedTarget;
+                    if (possibleTargets.length > 0) {
+                      selectedTarget = possibleTargets[Math.floor(Math.random() * possibleTargets.length)];
+                    } else {
+                      // 繋がっていなければランダム
+                      selectedTarget = { land: myLands[Math.floor(Math.random() * myLands.length)], enemyLand: enemyLands[0], isNavyAttack: false };
+                    }
+
+                    const enemyPower = Math.floor(selectedTarget.enemyLand.power * 1.2);
+                    setInvasionEvent({
+                        land: selectedTarget.land,
+                        enemyName: selectedTarget.isNavyAttack ? `${faction}水軍 (報復)` : `${faction}軍 (報復)`,
+                        enemyPower: enemyPower,
+                        isNavyAttack: selectedTarget.isNavyAttack
+                    });
+                    
+                    if (selectedTarget.isNavyAttack) {
+                       addLog(`【海路急報】同盟破棄に激怒した${faction}軍が、水軍を率いて海を渡り ${selectedTarget.land.name} へ報復の奇襲を仕掛けてきました！`, 'error');
+                    } else {
+                       addLog(`【急報】同盟破棄に激怒した${faction}軍が、報復として ${selectedTarget.land.name} へ侵攻を開始しました！`, 'error');
+                    }
+                }
+            }
+        }
+    }, 3000);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'map' && mapContainerRef.current && dataLoaded) {
+      setTimeout(() => {
+        const container = mapContainerRef.current;
+        if (!container) return;
+        
+        let targetX = 12800 * mapScale * 0.21; 
+        let targetY = 9600 * mapScale * 0.85;
+
+        // 占領済みの城（本拠地）があれば、そこを中心に合わせる
+        if (occupiedLands.length > 0) {
+          const baseCastle = LANDS.find(l => l.id === (capitalLandId || occupiedLands[0]));
+          if (baseCastle) {
+            targetX = 12800 * mapScale * (baseCastle.x / 100);
+            targetY = 9600 * mapScale * (baseCastle.y / 100);
+          }
+        }
+
+        container.scrollLeft = targetX - container.clientWidth / 2;
+        container.scrollTop = targetY - container.clientHeight / 2;
+      }, 100);
+    }
+  }, [activeTab, dataLoaded, capitalLandId, LANDS]);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
+  const addLog = (text, type = 'normal') => {
+    setLogs(prev => [...prev, { id: generateId(), text, type }]);
+  };
+
+  const getEquippedDeckIndex = (uniqueId) => {
+    for (let i = 0; i < decks.length; i++) {
+      if (decks[i].includes(uniqueId)) return i;
+    }
+    return -1;
+  };
+  const isGeneralEquipped = (uniqueId) => getEquippedDeckIndex(uniqueId) !== -1;
+
+  const handleTaxCollection = () => {
+    if (taxCooldown > 0) return;
+    const peasantCount = ownedGenerals.filter(g => g.id === 'g31').length;
+    const ikkiCount = ownedGenerals.filter(g => g.id === 'g32').length;
+    const landBonus = occupiedLands.length * 100;
+    const taxAmount = 300 + (peasantCount * 200) + (ikkiCount * 100) + landBonus;
+    
+    if (Math.random() < 0.40 && (occupiedLands.length > 0 || copper > 1000)) {
+      setTaxCooldown(60); 
+      let lostLandName = '';
+      
+      // 居城以外の占領地をリストアップ
+      const nonCapitalLands = occupiedLands.filter(id => id !== capitalLandId);
+
+      if (nonCapitalLands.length > 0) {
+        // 居城以外からランダムに1つ失う
+        const lostIndex = Math.floor(Math.random() * nonCapitalLands.length);
+        const lostLandId = nonCapitalLands[lostIndex];
+        const lostLand = LANDS.find(l => l.id === lostLandId);
+        lostLandName = lostLand ? lostLand.name : 'どこかの領地';
+        
+        setOccupiedLands(prev => prev.filter(id => id !== lostLandId)); 
+      }
+
+      const lostCopper = Math.floor(copper / 2);
+      setCopper(prev => prev - lostCopper); 
+      setIkkiEvent({ landName: lostLandName, lostCopper });
+      
+      if (lostLandName) {
+        addLog(`【一揆勃発】過酷な搾取により一揆が起きた！ ${lostLandName}を奪われ、銅銭${lostCopper}を失った...`, 'error');
+      } else {
+        addLog(`【一揆勃発】過酷な搾取により一揆が起きた！ 銅銭${lostCopper}を失った...`, 'error');
+      }
+      return; 
+    }
+
+    setCopper(prev => prev + taxAmount);
+    setTaxCooldown(30); 
+    addLog(`【徴税】領民から重税を巻き上げた！ 銅銭 +${taxAmount} (農民:${peasantCount}人)`, 'warning');
+    
+    if (peasantCount > 0 && Math.random() < 0.3) {
+      const peasantIndex = ownedGenerals.findIndex(g => g.id === 'g31' && !isGeneralEquipped(g.uniqueId));
+      if (peasantIndex !== -1) {
+        setOwnedGenerals(prev => {
+          const next = [...prev];
+          next.splice(peasantIndex, 1);
+          return next;
+        });
+        addLog(`【逃亡】過酷な年貢に耐えかね、農民が1人逃亡してしまった...`, 'error');
+      }
+    }
+  };
+
+  const callGemini = async (prompt, systemInstruction = "あなたは戦国時代の天才軍師です。古風な口調（〜でござる、〜じゃ、等）で簡潔に答えてください。") => {
+    const apiKey = "";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    
+    const payload = {
+      contents: [{ parts: [{ text: prompt }] }],
+      systemInstruction: { parts: [{ text: systemInstruction }] }
+    };
+
+    let retries = 5;
+    let delay = 1000;
+    while (retries > 0) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('API Error');
+        const data = await res.json();
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || "返答がありません。";
+      } catch (e) {
+        retries--;
+        if (retries === 0) return "通信に失敗いたしました。";
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2;
+      }
+    }
+  };
+
+  const breakthroughGeneral = (targetUniqueId) => {
+    const target = ownedGenerals.find(g => g.uniqueId === targetUniqueId);
+    if (!target || (target.breakthrough || 0) >= 5) {
+      addLog('これ以上は限界突破できませぬ。（最大5回まで）', 'error');
+      return;
+    }
+
+    const materialIndex = ownedGenerals.findIndex(g => 
+       g.uniqueId !== targetUniqueId && 
+       g.id === target.id && 
+       !isGeneralEquipped(g.uniqueId)
+    );
+
+    if (materialIndex === -1) {
+       addLog(`限界突破の素材となる「${target.name}」（未編制）が見つかりませぬ。`, 'error');
+       return;
+    }
+
+    const material = ownedGenerals[materialIndex];
+
+    setOwnedGenerals(prev => {
+       const next = [...prev];
+       next.splice(materialIndex, 1);
+       const tIndex = next.findIndex(g => g.uniqueId === targetUniqueId);
+       next[tIndex] = { ...next[tIndex], breakthrough: (next[tIndex].breakthrough || 0) + 1 };
+       return next;
+    });
+    addLog(`【限界突破】${material.name}を消費し、${target.name} の突破ランクが +${(target.breakthrough || 0) + 1} となった！`, 'rare');
+  };
+
+  const buyItem = (type, itemId, price, name, amount = 1) => {
+    const totalPrice = price * amount;
+    if (copper < totalPrice) {
+      addLog(`銅銭が不足しておる。(${totalPrice.toLocaleString()}銅銭必要)`, 'error');
+      return;
+    }
+    setCopper(prev => prev - totalPrice);
+    if (type === 'item') {
+      setInventory(prev => ({ ...prev, [itemId]: (prev[itemId] || 0) + amount }));
+    } else if (type === 'weapon') {
+      setInventoryWeapons(prev => ({ ...prev, [itemId]: (prev[itemId] || 0) + amount }));
+    }
+    addLog(`【商店】${name}を ${amount}個、${totalPrice.toLocaleString()}銅銭で買い求めた！`, 'success');
+  };
+
+  const buyNavy = () => {
+    if (copper < 50000) {
+      addLog(`銅銭が不足しておる。(50,000銅銭必要)`, 'error');
+      return;
+    }
+    setCopper(prev => prev - 50000);
+    setHasNavy(true);
+    addLog(`【水軍創設】50,000銅銭を投じ、強力な水軍を編成した！これで自軍の港から全国の港へ奇襲が可能となった！`, 'rare');
+  };
+
+  const buyMerchantItem = (ware) => {
+    if (copper < ware.price) {
+      addLog(`銅銭が不足しておる。(${ware.price.toLocaleString()}銅銭必要)`, 'error');
+      return;
+    }
+    setCopper(prev => prev - ware.price);
+    
+    if (ware.itemType === 'item') {
+      setInventory(prev => ({ ...prev, [ware.id]: (prev[ware.id] || 0) + 1 }));
+    } else {
+      setInventoryWeapons(prev => ({ ...prev, [ware.id]: (prev[ware.id] || 0) + 1 }));
+    }
+    
+    addLog(`【行商人】${ware.name}を ${ware.price.toLocaleString()}銅銭で買い求めた！`, 'success');
+    
+    setMerchantEvent(prev => {
+      if (!prev) return null;
+      const newWares = prev.wares.filter(w => w.id !== ware.id);
+      if (newWares.length === 0) return null;
+      return { wares: newWares };
+    });
+  };
+
+  const handleEquipWeapon = (generalId, weaponId) => {
+    if (weaponId) {
+      const currentEquip = equippedWeapons[generalId];
+      setInventoryWeapons(prev => {
+        const next = { ...prev };
+        if (currentEquip) next[currentEquip] = (next[currentEquip] || 0) + 1; 
+        next[weaponId] = Math.max(0, (next[weaponId] || 0) - 1); 
+        return next;
+      });
+      setEquippedWeapons(prev => ({ ...prev, [generalId]: weaponId }));
+      const wp = MASTER_WEAPONS.find(w => w.id === weaponId);
+      addLog(`${wp.name} を装備した！`, 'system');
+    } else {
+      const currentEquip = equippedWeapons[generalId];
+      if (currentEquip) {
+        setInventoryWeapons(prev => ({ ...prev, [currentEquip]: (prev[currentEquip] || 0) + 1 }));
+        setEquippedWeapons(prev => {
+          const next = { ...prev };
+          delete next[generalId];
+          return next;
+        });
+        addLog(`装備を外した。`, 'system');
+      }
+    }
+    setShowWeaponModalFor(null);
+  };
+
+  const useItem = (itemId) => {
+    if (inventory[itemId] <= 0) return;
+    if (itemId === 'drum') {
+      setInventory(prev => ({ ...prev, drum: prev.drum - 1 }));
+      setActiveBuff('drum');
+      addLog('【陣太鼓】を使用した！次の出陣で部隊の戦力が1.5倍になる。', 'rare');
+    } else if (itemId === 'hora') {
+      setInventory(prev => ({ ...prev, hora: prev.hora - 1 }));
+      setActiveBuff('hora');
+      addLog('【法螺貝】を使用した！次の出陣で部隊の戦力が1.2倍になる。', 'rare');
+    } else if (itemId === 'tactics') {
+      setShowItemModal('tactics');
+    }
+  };
+
+  const applyTactics = (generalId, count = 1) => {
+    if (inventory.tactics < count) return;
+    setInventory(prev => ({ ...prev, tactics: prev.tactics - count }));
+    
+    let leveledUpCount = 0;
+    let finalLevel = 0;
+    const target = ownedGenerals.find(g => g.uniqueId === generalId);
+
+    setOwnedGenerals(prevGenerals => prevGenerals.map(g => {
+      if (g.uniqueId !== generalId) return g;
+      let newExp = g.currentExp + 500 * count;
+      let newLevel = g.level;
+      while (newExp >= newLevel * 100) {
+        newExp -= newLevel * 100;
+        newLevel++;
+        leveledUpCount++;
+      }
+      finalLevel = newLevel;
+      return { ...g, level: newLevel, currentExp: newExp };
+    }));
+    
+    if (leveledUpCount > 0) {
+      addLog(`【昇級】${target.name}に兵法書を${count}冊使い、レベル${finalLevel}に昇級した！`, 'rare');
+    } else {
+      addLog(`【兵法書】${target.name}に${count}冊使い、経験値${500 * count}を与えた。`, 'success');
+    }
+    
+    if (inventory.tactics - count <= 0) {
+      setShowItemModal(null);
+    }
+  };
+
+  const drawGacha = (times) => {
+    const cost = times === 1 ? 200 : 1900;
+    if (gold < cost) {
+      addLog(`小判が不足しておる。(${cost}小判必要)`, 'error');
+      return;
+    }
+    setGold(prev => prev - cost);
+    const newGenerals = [];
+    const drawLogs = [];
+
+    const drawSe = new Audio('https://cdn.pixabay.com/download/audio/2021/08/04/audio_341edde289.mp3');
+    drawSe.volume = bgmVolume;
+    drawSe.play().catch(() => { console.log("SEの自動再生がブロックされました"); });
+
+    for (let i = 0; i < times; i++) {
+      const rand = Math.random() * 100;
+      let rarity = 3;
+      if (rand < 5) rarity = 5;
+      else if (rand < 20) rarity = 4;
+      else if (rand < 50) rarity = 3;
+      else if (rand < 80) rarity = 2; 
+      else rarity = 1; 
+      
+      const candidates = MASTER_GENERALS.filter(g => g.rarity === rarity);
+      const selected = candidates[Math.floor(Math.random() * candidates.length)];
+      
+      const newGeneral = { ...selected, uniqueId: generateId(), level: 1, currentExp: 0, breakthrough: 0 };
+      newGenerals.push(newGeneral);
+      
+      let logStr = `登用: [星${rarity}] ${selected.name} が配下に加わった！`;
+      if (rarity === 5) logStr = `【大吉報】` + logStr;
+      drawLogs.push({ id: generateId(), text: logStr, type: rarity === 5 ? 'rare' : 'normal' });
+    }
+
+    setOwnedGenerals(prev => [...prev, ...newGenerals]);
+    setLogs(prev => [...prev, ...drawLogs]);
+    setGachaResult(newGenerals);
+  };
+
+  const addToDeck = (general) => {
+    const newDecks = [...decks];
+    let alreadyEquipped = false;
+    
+    for (let d = 0; d < newDecks.length; d++) {
+      const idx = newDecks[d].indexOf(general.uniqueId);
+      if (idx !== -1) {
+        newDecks[d][idx] = null;
+        alreadyEquipped = true;
+      }
+    }
+
+    const currentDeck = [...newDecks[activeDeckIndex]];
+    const emptyIndex = currentDeck.indexOf(null);
+    
+    if (emptyIndex !== -1) {
+      currentDeck[emptyIndex] = general.uniqueId;
+      newDecks[activeDeckIndex] = currentDeck;
+      setDecks(newDecks);
+      if (alreadyEquipped) addLog(`${general.name}の配置を変更した。`);
+      else addLog(`${general.name}を第${activeDeckIndex + 1}部隊に配属した。`);
+    } else {
+      addLog(`第${activeDeckIndex + 1}部隊は満員じゃ！誰かを外すのじゃ。`, 'error');
+    }
+  };
+
+  const removeFromDeck = (deckIdx, slotIdx) => {
+    const newDecks = [...decks];
+    const uniqueId = newDecks[deckIdx][slotIdx];
+    if (uniqueId) {
+      const removedGeneral = ownedGenerals.find(g => g.uniqueId === uniqueId);
+      if (removedGeneral) addLog(`${removedGeneral.name}を編制から外した。`);
+      newDecks[deckIdx][slotIdx] = null;
+      setDecks(newDecks);
+    }
+  };
+
+  const calculateDeckPower = (deckIdx) => {
+    const targetDeck = decks[deckIdx].map(id => id ? ownedGenerals.find(g => g.uniqueId === id) || null : null);
+    return targetDeck.reduce((sum, g) => {
+      if (!g) return sum;
+      const levelMultiplier = 1 + ((g.level - 1) * 0.1);
+      const breakthroughMultiplier = 1 + ((g.breakthrough || 0) * 0.1);
+      const allianceBuffMultiplier = 1 + ((allianceInfo.level - 1) * 0.05);
+      let baseStat = (g.atk + g.int + g.def) * breakthroughMultiplier;
+      const weaponId = equippedWeapons[g.uniqueId];
+      if (weaponId) {
+        const wp = MASTER_WEAPONS.find(w => w.id === weaponId);
+        if (wp) baseStat += (wp.atk + wp.int + wp.def);
+      }
+      return sum + Math.floor(baseStat * levelMultiplier * allianceBuffMultiplier * 10);
+    }, 0);
+  };
+
+  const startBattle = (land, deckIdx, isDefense = false, customEnemyPower = null, customEnemyName = null) => {
+    if (battlingLandId) return;
+
+    if (diplomacyRelations[land.owner] === 'alliance') {
+       addLog(`【同盟】${land.owner}とは同盟を結んでおる。攻め込むなら先に同盟を破棄せよ！`, "error");
+       return;
+    }
+
+    const activeDeckGenerals = decks[deckIdx]
+      .map(id => id ? ownedGenerals.find(g => g.uniqueId === id) || null : null)
+      .filter(g => g !== null);
+
+    if (activeDeckGenerals.length === 0) {
+      addLog(`第${deckIdx + 1}部隊には誰も出陣しておらんぞ！編制せよ。`, 'error');
+      if (!isDefense) {
+        setActiveTab('deck');
+        setActiveDeckIndex(deckIdx);
+      }
+      return;
+    }
+
+    setBattlingLandId(land.id);
+    if(isDefense) setInvasionEvent(null); 
+
+    const deckPower = calculateDeckPower(deckIdx);
+    const targetEnemyPower = customEnemyPower || land.power;
+    const targetEnemyName = customEnemyName || (occupiedLands.includes(land.id) ? '賊軍' : `${land.owner}軍`);
+    
+    const wasBgmPlaying = isBgmPlaying;
+    if (wasBgmPlaying && audioRef.current) {
+      audioRef.current.pause();
+    }
+
+    setBattleScene({ 
+      phase: 'intro', 
+      land, 
+      activeDeck: activeDeckGenerals, 
+      deckPower, 
+      enemyPower: targetEnemyPower, 
+      enemyName: targetEnemyName,
+      resultText: '', 
+      isVictory: false, 
+      isDraw: false, 
+      wasBgmPlaying,
+      isDefense 
+    });
+
+    setTimeout(() => {
+      setBattleScene(prev => ({ ...prev, phase: 'clash' }));
+      
+      const clashSe = new Audio('https://cdn.pixabay.com/download/audio/2022/03/15/audio_24e00db620.mp3');
+      clashSe.volume = bgmVolume;
+      clashSe.loop = true; 
+      clashSe.play().catch(() => { console.log("SEの自動再生がブロックされました"); });
+      
+      const factions = new Set(activeDeckGenerals.map(g => g.faction));
+      if (factions.size === 1 && activeDeckGenerals.length === 5) {
+         addLog(`【陣営効果極大】5人全員が「${activeDeckGenerals[0].faction}」のため、ステータスが大幅上昇！`, 'rare');
+      }
+
+      setTimeout(() => {
+        clashSe.pause();
+        let finalPower = deckPower * (0.8 + (Math.random() * 0.4));
+        let resultText = '';
+
+        if (activeBuff === 'drum') { finalPower *= 1.5; addLog(`【陣太鼓 効果】部隊の戦力が1.5倍になった！`, 'rare'); setActiveBuff(null); } 
+        else if (activeBuff === 'hora') { finalPower *= 1.2; addLog(`【法螺貝 効果】部隊の戦力が1.2倍になった！`, 'rare'); setActiveBuff(null); }
+
+        const allyFactions = Object.keys(diplomacyRelations).filter(f => diplomacyRelations[f] === 'alliance');
+        let reinforcementText = '';
+        const reinforcementChance = Math.min(allyFactions.length * 0.15, 0.6); // 1カ国につき15%、最大60%確率
+        if (allyFactions.length > 0 && Math.random() < reinforcementChance) {
+          const randomAlly = allyFactions[Math.floor(Math.random() * allyFactions.length)];
+          finalPower *= 1.3;
+          reinforcementText = `（${randomAlly}軍の援軍あり）`;
+          addLog(`【援軍到着】同盟国「${randomAlly}軍」が加勢に駆けつけた！戦力が大幅に上昇！`, 'rare');
+        }
+
+        let isVictory = finalPower > targetEnemyPower;
+        let isDraw = !isVictory && finalPower > targetEnemyPower * 0.7;
+        let rareWares = [];
+
+        if (isVictory) {
+          const winSe = new Audio('https://cdn.pixabay.com/download/audio/2021/08/04/audio_0625c1539c.mp3');
+          winSe.volume = bgmVolume;
+          winSe.play().catch(() => { console.log("SEの自動再生がブロックされました"); });
+
+          let dropText = '';
+          if (Math.random() < 0.3) { setInventory(prev => ({ ...prev, tactics: prev.tactics + 1 })); dropText += ' / 兵法書×1'; }
+          if (Math.random() < 0.2) { setInventory(prev => ({ ...prev, drum: prev.drum + 1 })); dropText += ' / 陣太鼓×1'; }
+          
+          if (Math.random() < 0.35) {
+            const priceMultiplier = 0.5 + (Math.random() * 0.3); // 0.5倍〜0.8倍の割引価格
+            if (Math.random() < 0.5) {
+               rareWares.push({ id: 'hora', itemType: 'item', name: '法螺貝', price: Math.floor(3000 * priceMultiplier), rarity: 3, description: '次の出陣で自軍戦力1.2倍。小回りの利く戦具。' });
+            }
+            const rareWeapons = MASTER_WEAPONS.filter(w => ['wp4', 'wp5', 'wp6', 'wp7', 'wp8'].includes(w.id));
+            const pickedWeapon = rareWeapons[Math.floor(Math.random() * rareWeapons.length)];
+            rareWares.push({ ...pickedWeapon, itemType: 'weapon', price: Math.floor(pickedWeapon.price * priceMultiplier) });
+          }
+
+          if (isDefense) {
+            resultText = '防衛成功';
+            addLog(`【防衛成功】第${deckIdx + 1}部隊が見事敵を撃退し、${land.name}を守り抜いた！`, 'success');
+            const defenseReward = Math.floor(targetEnemyPower / 10);
+            addLog(`防衛報酬: 銅銭 +${defenseReward} / 経験値 +${land.exp * 2}${dropText}`, 'success');
+            setCopper(prev => prev + defenseReward);
+          } else {
+            const isAlreadyOccupied = occupiedLands.includes(land.id);
+            if (!isAlreadyOccupied) {
+              resultText = '大勝・占領';
+              addLog(`【占領】第${deckIdx + 1}部隊が敵を撃破し、${land.name}を占領した！`, 'success');
+              addLog(`戦利品: 小判 +${land.goldReward} / 銅銭 +${land.reward} / 経験値 +${land.exp}${dropText}`, 'success');
+              setGold(prev => prev + land.goldReward); 
+              setCopper(prev => prev + land.reward);
+              setOccupiedLands(prev => {
+                const newOccupied = [...prev, land.id];
+                if (newOccupied.length === LANDS.length) {
+                   setTimeout(() => {
+                     setIsGameClear(true);
+                     const clearSe = new Audio('https://cdn.pixabay.com/download/audio/2021/08/04/audio_c6ccf3232f.mp3');
+                     clearSe.volume = bgmVolume;
+                     clearSe.play().catch(e => console.log("SE blocked", e));
+                   }, 2000);
+                   addLog("【大祝勝】日ノ本全土を平定！天下統一を成し遂げました！", "rare");
+                }
+                return newOccupied;
+              });
+            } else {
+              resultText = '掃討完了';
+              addLog(`【掃討】領地内の賊を討伐した！`, 'success');
+              addLog(`戦利品: 経験値 +${land.exp}${dropText}`, 'success');
+            }
+          }
+          
+          setOwnedGenerals(prevGenerals => prevGenerals.map(g => {
+            const isActive = activeDeckGenerals.some(ag => ag.uniqueId === g.uniqueId);
+            if (!isActive) return g;
+            const gainedExp = isDefense ? land.exp * 2 : land.exp;
+            let newExp = g.currentExp + gainedExp;
+            let newLevel = g.level;
+            while (newExp >= newLevel * 100) { newExp -= newLevel * 100; newLevel++; addLog(`【昇級】${g.name} がレベル${newLevel}に昇級した！`, 'rare'); }
+            return { ...g, level: newLevel, currentExp: newExp };
+          }));
+        } else if (isDraw) {
+          resultText = '引き分け';
+          if (isDefense) {
+             addLog(`【引き分け】敵の猛攻をなんとか凌ぎ、${land.name}を防衛した。`, 'warning');
+          } else {
+             addLog(`【引き分け】両軍痛み分けとなった。部隊は帰還した。`, 'warning');
+          }
+        } else {
+          const loseSe = new Audio('https://cdn.pixabay.com/download/audio/2021/08/04/audio_bb630cc098.mp3');
+          loseSe.volume = bgmVolume;
+          loseSe.play().catch(() => { console.log("SEの自動再生がブロックされました"); });
+          
+          if (isDefense) {
+            resultText = '防衛失敗';
+            addLog(`【防衛失敗】我が軍は壊滅し、${land.name}が敵に奪われてしまった...`, 'error');
+            setOccupiedLands(prev => prev.filter(id => id !== land.id));
+            
+            // 敵の勢力に書き換える
+            let newOwner = '群';
+            const factionMatch = Object.values(FACTIONS).find(f => targetEnemyName.startsWith(f));
+            if (factionMatch) newOwner = factionMatch;
+            
+            setLANDS(prev => prev.map(l => l.id === land.id ? { ...l, owner: newOwner } : l));
+
+            // 居城が奪われたらゲームオーバー
+            if (land.id === capitalLandId) {
+              setTimeout(() => setIsGameOver(true), 1500);
+              addLog(`【御家滅亡】居城たる${land.name}が陥落...我が軍は滅亡しました...`, 'error');
+            }
+
+          } else {
+            resultText = '大敗';
+            addLog(`【敗北】我が軍は壊滅した...再起を図ろう。`, 'error');
+          }
+        }
+
+        setBattleScene(prev => ({ ...prev, phase: 'result', resultText, isVictory, isDraw, merchantWares: rareWares }));
+
+        const battlePrompt = `戦国時代の合戦結果です。臨場感のある短い戦況報告（2〜3行程度）を軍記物風に書いてください。【出陣武将】${activeDeckGenerals.map(g => g.name).join(', ')} 【敵軍】兵力 ${targetEnemyPower} の ${targetEnemyName} 【結果】${resultText}${reinforcementText}`;
+        const logId = generateId();
+        setLogs(prev => [...prev, { id: logId, text: "✨ 戦況報告を記帳中...", type: 'system' }]);
+        
+        callGemini(battlePrompt, "あなたは戦記を綴る右筆（書記）です。客観的かつ劇的に、古風な文体で短く結果を記してください。").then(text => {
+          setLogs(prev => prev.map(log => log.id === logId ? { id: logId, text: `✨ 【戦況報告】\n${text}`, type: 'rare' } : log));
+        });
+      }, 2500); 
+    }, 2000); 
+  };
+
+  const closeBattleScene = () => {
+    if (battleScene?.wasBgmPlaying && audioRef.current) {
+      audioRef.current.play().catch(e => {
+        console.log("BGM再開エラー", e);
+        setIsBgmPlaying(false);
+      });
+    }
+    
+    if (battleScene?.merchantWares?.length > 0) {
+      setMerchantEvent({ wares: battleScene.merchantWares });
+      addLog(`【行商人】合戦の噂を聞きつけ、行商人が珍しい品を持ち込んできた！`, 'rare');
+    }
+    
+    setBattleScene(null);
+    setBattlingLandId(null);
+  };
+
+  const handleConsultAdvisor = async () => {
+    if (!advisorQuery.trim() || isConsulting) return;
+    setIsConsulting(true);
+    setAdvisorResponse('');
+    const deckInfo = decks.map((deck, idx) => {
+      const genStr = deck.filter(id=>id).map(id => {
+        const g = ownedGenerals.find(og => og.uniqueId === id);
+        return g ? `${g.name}(Lv${g.level}/${g.troop.name})` : '';
+      }).join(', ');
+      return `第${idx+1}部隊: ${genStr || '空'}`;
+    }).join(' | ');
+
+    const prompt = `我が軍の現在の状況は以下の通りじゃ。【現在の編制】${deckInfo} 【所持銅銭】${copper} 【所持小判】${gold} 相談内容: ${advisorQuery}`;
+    const response = await callGemini(prompt);
+    setAdvisorResponse(response);
+    setIsConsulting(false);
+  };
+
+  const donateAlliance = () => {
+    if (copper < 1000) {
+      addLog("銅銭が足りませぬ。", 'error');
+      return;
+    }
+    setCopper(prev => prev - 1000);
+    
+    setAllianceInfo(prev => {
+      let newExp = prev.exp + 100;
+      let newLevel = prev.level;
+      let newMaxExp = prev.maxExp;
+      let levelUpLogs = [];
+      
+      if (newExp >= newMaxExp) {
+        newLevel++;
+        newExp -= newMaxExp;
+        newMaxExp = Math.floor(newMaxExp * 1.5); 
+        const logMsg = `【祝賀】同盟レベルが ${newLevel} に上昇した！同盟技術が強化されたぞ！`;
+        addLog(logMsg, 'rare');
+        levelUpLogs.push(logMsg);
+      }
+      
+      return {
+        ...prev,
+        level: newLevel,
+        exp: newExp,
+        maxExp: newMaxExp,
+        logs: [...levelUpLogs, `御館様が1000銅銭を寄付し、同盟経験値が100上昇しました。`, ...prev.logs].slice(0, 5)
+      };
+    });
+    addLog("同盟に寄付を行い、技術発展に貢献しました。", 'success');
+  };
+
+  const sendChatMessage = () => {
+    if (!chatInput.trim()) return;
+    const userText = chatInput;
+    setChatMessages(prev => [...prev, {
+      id: generateId(),
+      sender: '御館様 (あなた)',
+      text: userText,
+      isSelf: true
+    }]);
+    setChatInput('');
+
+    const members = allianceInfo.members.filter(m => m.name !== '御館様 (あなた)');
+    const replier = members.length > 0 ? members[Math.floor(Math.random() * members.length)].name : '同盟の者';
+    const prompt = `盟主が同盟チャットで「${userText}」と発言しました。あなたは「${replier}」として、戦国時代らしい古風な口調で、1〜2行の短く熱い返事をしてください。`;
+
+    setTimeout(async () => {
+      const response = await callGemini(prompt, "あなたは戦国武将です。短く、感情豊かに、古風な言葉遣い（〜でござる、〜じゃ等）で返信してください。");
+      setChatMessages(prev => [...prev, {
+        id: generateId(),
+        sender: replier,
+        text: response,
+        isSelf: false
+      }]);
+    }, 1000 + Math.random() * 2000); 
+  };
+
+  useEffect(() => {
+    if (activeTab === 'alliance') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, activeTab]);
+
+  const RarityStars = ({ count }) => (
+    <div className="flex">
+      {[...Array(count)].map((_, i) => <Star key={i} className="w-3 h-3 text-yellow-400 fill-current" />)}
+    </div>
+  );
+
+  const Star = (props) => (
+    <svg viewBox="0 0 24 24" {...props}>
+      <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+    </svg>
+  );
+
+  return (
+    <div className="flex flex-col h-screen bg-stone-900 text-stone-200 font-serif relative">
+      
+      {/* ＝＝＝ ゲームオーバー モーダル ＝＝＝ */}
+      {isGameOver && (
+        <div className="absolute inset-0 z-[1000] bg-black/95 flex flex-col items-center justify-center overflow-hidden backdrop-blur-md animate-fade-in px-4">
+          <div className="relative z-10 text-center flex flex-col items-center animate-pop-in">
+            <Skull className="w-32 h-32 text-red-700 mb-4 animate-pulse drop-shadow-[0_0_30px_rgba(185,28,28,0.8)]" />
+            <h1 className="text-6xl md:text-9xl font-black text-transparent bg-clip-text bg-gradient-to-b from-red-500 to-red-900 mb-6 tracking-[0.2em] drop-shadow-2xl" style={{fontFamily: 'serif'}}>御家滅亡</h1>
+            <div className="bg-stone-900/80 border-2 border-red-900 p-8 rounded-2xl shadow-[0_0_40px_rgba(153,27,27,0.4)] mb-8 max-w-2xl">
+              <p className="text-2xl text-red-200 mb-4 font-bold tracking-widest">本拠地が陥落し、我が軍は瓦解いたしました……</p>
+              <p className="text-stone-400 italic mb-2">「夏草や 兵どもが 夢の跡」</p>
+              <p className="text-stone-500">志半ばにして、貴殿の野望はここに潰えました。<br/>しかし、この乱世、何度でもやり直すことができます。</p>
+            </div>
+            <button onClick={() => { setIsGameOver(false); setShowResetModal(true); }} className="px-10 py-4 bg-red-950 hover:bg-red-900 text-red-200 border-2 border-red-700 rounded-full font-bold text-xl shadow-[0_0_20px_rgba(153,27,27,0.5)] transition-all transform hover:scale-105">
+              輪廻の果てに（やり直す）
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ＝＝＝ リセット確認 モーダル ＝＝＝ */}
+      {showResetModal && (
+        <div className="absolute inset-0 z-[2000] bg-black/80 flex flex-col items-center justify-center overflow-hidden backdrop-blur-sm px-4 animate-fade-in">
+          <div className="bg-stone-900 border-4 border-red-700 p-8 rounded-xl max-w-md w-full text-center shadow-[0_0_50px_rgba(220,38,38,0.4)]">
+             <RefreshCw className="w-16 h-16 text-red-500 mx-auto mb-4 animate-spin-slow" />
+             <h2 className="text-3xl font-bold text-red-500 mb-4">御家再興（初期化）</h2>
+             <p className="text-stone-300 mb-8 leading-relaxed">
+               これまでの記録（占領地、武将、所持金など）を<br/>
+               <span className="text-red-400 font-bold">全て消去し、最初からやり直しますか？</span><br/>
+               <span className="text-xs text-stone-500">※この操作は取り消せません。</span>
+             </p>
+             <div className="flex gap-4">
+               <button onClick={() => setShowResetModal(false)} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold rounded border border-stone-600 transition-colors">
+                 やめる
+               </button>
+               <button onClick={executeReset} className="flex-1 py-3 bg-red-800 hover:bg-red-700 text-white font-bold rounded shadow-lg transition-colors border border-red-500">
+                 やり直す
+               </button>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ＝＝＝ 天下統一 祝賀モーダル ＝＝＝ */}
+      {isGameClear && (
+        <div className="absolute inset-0 z-[1000] bg-black/95 flex flex-col items-center justify-center overflow-hidden backdrop-blur-md animate-fade-in px-4">
+          <div className="absolute inset-0 pointer-events-none">
+            {[...Array(60)].map((_, i) => (
+              <div 
+                key={i} 
+                className="absolute animate-fall"
+                style={{
+                  left: `${Math.random() * 100}%`,
+                  top: `-10%`,
+                  width: `${Math.random() * 10 + 5}px`,
+                  height: `${Math.random() * 20 + 10}px`,
+                  backgroundColor: i % 2 === 0 ? '#fbbf24' : '#d97706',
+                  opacity: Math.random(),
+                  animationDuration: `${Math.random() * 3 + 2}s`,
+                  animationDelay: `${Math.random() * 5}s`,
+                  transform: `rotate(${Math.random() * 360}deg)`
+                }}
+              />
+            ))}
+          </div>
+          <div className="relative z-10 text-center flex flex-col items-center animate-pop-in">
+            <div className="relative">
+              <Trophy className="w-32 h-32 text-amber-400 mb-4 animate-pulse drop-shadow-[0_0_30px_rgba(251,191,36,0.8)]" />
+              <Sparkles className="absolute -top-4 -right-4 w-12 h-12 text-white animate-pulse" />
+            </div>
+            <h1 className="text-6xl md:text-9xl font-black text-transparent bg-clip-text bg-gradient-to-b from-amber-200 to-amber-600 mb-6 tracking-[0.2em] drop-shadow-2xl" style={{fontFamily: 'serif'}}>天下統一</h1>
+            <div className="bg-stone-900/80 border-2 border-amber-600 p-8 rounded-2xl shadow-[0_0_40px_rgba(217,119,6,0.4)] mb-8 max-w-3xl">
+              <p className="text-2xl text-amber-100 mb-4 font-bold tracking-widest">お見事！日ノ本全土は御館様の手に落ちました。</p>
+              <p className="text-stone-300 italic mb-2 leading-relaxed">「五十年、人の世を夢幻の如くなり」</p>
+              <p className="text-stone-400 leading-loose">数多の群雄を退け、ここに泰平の世が築かれん。<br/>貴殿の武名はこの大地に千年先まで語り継がれるであろう。</p>
+            </div>
+            <button onClick={() => { setIsGameClear(false); setShowResetModal(true); }} className="px-10 py-4 bg-amber-900/80 hover:bg-amber-800 text-amber-100 border-2 border-amber-500 rounded-full font-bold text-xl shadow-[0_0_20px_rgba(217,119,6,0.5)] transition-all transform hover:scale-105">
+              新たな歴史を刻む（リセット）
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ＝＝＝ 行商人イベントモーダル ＝＝＝ */}
+      {merchantEvent && (
+        <div className="absolute inset-0 z-[60] bg-black/80 flex flex-col items-center justify-center overflow-hidden backdrop-blur-sm animate-fade-in px-4">
+          <div className="bg-stone-900 border-4 border-amber-700 p-6 rounded-xl max-w-2xl w-full shadow-[0_0_40px_rgba(217,119,6,0.4)]">
+             <div className="flex items-center gap-3 mb-6 border-b border-stone-700 pb-4">
+               <div className="bg-stone-800 p-3 rounded-full border border-stone-600"><Store className="w-8 h-8 text-amber-500"/></div>
+               <div>
+                 <h2 className="text-2xl font-bold text-amber-500">流浪の行商人</h2>
+                 <p className="text-stone-400 text-sm mt-1">「戦の勝利、おめでとうございます。今日は特別に、珍しい品を相場よりお安くお譲りしますぞ！」</p>
+               </div>
+               <div className="ml-auto bg-stone-950 px-3 py-1.5 rounded-lg border border-yellow-700/50 flex items-center gap-2">
+                 <Coins className="w-4 h-4 text-yellow-500" />
+                 <span className="font-mono text-yellow-400 font-bold">{copper.toLocaleString()}</span>
+               </div>
+             </div>
+
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                {merchantEvent.wares.map(ware => (
+                  <div key={ware.id} className="bg-gradient-to-b from-stone-800 to-stone-900 border border-stone-600 p-4 rounded-lg flex flex-col hover:border-amber-500 transition-colors">
+                     <div className="flex justify-between items-start mb-2">
+                       <span className={`font-bold text-lg ${ware.rarity >= 5 ? 'text-amber-400' : ware.rarity === 4 ? 'text-purple-400' : 'text-blue-300'}`}>{ware.name}</span>
+                       <RarityStars count={ware.rarity} />
+                     </div>
+                     <p className="text-xs text-stone-400 mb-4 h-10">{ware.description || (ware.type ? `種類: ${ware.type} / 武力+${ware.atk} 知力+${ware.int} 統率+${ware.def}` : '')}</p>
+                     
+                     <button onClick={() => buyMerchantItem(ware)} className="mt-auto bg-stone-950 hover:bg-amber-900/50 border border-stone-700 hover:border-amber-600 text-stone-200 py-2 rounded flex justify-center items-center gap-2 transition-all font-bold">
+                       <Coins className="w-4 h-4 text-yellow-500"/> {ware.price.toLocaleString()} で購入
+                     </button>
+                  </div>
+                ))}
+             </div>
+             
+             <button onClick={() => setMerchantEvent(null)} className="w-full py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold rounded border border-stone-600 transition-colors">
+               今は用はない（立ち去る）
+             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ＝＝＝ 侵略イベント（防衛戦）モーダル ＝＝＝ */}
+      {invasionEvent && (
+        <div className="absolute inset-0 z-[65] bg-red-950/90 flex flex-col items-center justify-center overflow-hidden backdrop-blur-sm animate-fade-in px-4">
+          <div className="bg-stone-900 border-4 border-red-700 p-6 md:p-8 rounded-xl max-w-lg w-full text-center shadow-[0_0_50px_rgba(220,38,38,0.5)]">
+             {invasionEvent.isNavyAttack ? (
+               <Ship className="w-16 h-16 md:w-20 md:h-20 text-cyan-400 mx-auto mb-4 animate-bounce drop-shadow-[0_0_15px_rgba(34,211,238,0.5)]" />
+             ) : (
+               <AlertTriangle className="w-16 h-16 md:w-20 md:h-20 text-red-500 mx-auto mb-4 animate-pulse" />
+             )}
+             <h2 className="text-3xl md:text-4xl font-bold text-red-500 mb-6 tracking-widest">
+               {invasionEvent.isNavyAttack ? '敵水軍来襲！' : '敵軍来襲！'}
+             </h2>
+             <p className="text-md md:text-lg text-stone-300 mb-2">我が領地 <span className="font-bold text-amber-400">【{invasionEvent.land.name}】</span> に</p>
+             <p className="text-md md:text-lg text-stone-300 mb-6">
+               <span className="font-bold text-red-400">{invasionEvent.enemyName}</span> が{invasionEvent.isNavyAttack ? '海を渡って奇襲を仕掛けて' : '攻め込んで'}きました！
+             </p>
+             
+             <div className="bg-red-900/30 border border-red-800 p-4 rounded-lg mb-6 text-left">
+               <h3 className="font-bold text-red-400 mb-2 border-b border-red-800 pb-1">【敵軍情報】</h3>
+               <p className="text-stone-300 flex items-center justify-between">
+                 <span>推測兵力:</span>
+                 <span className="font-mono font-bold text-xl text-red-400">{invasionEvent.enemyPower.toLocaleString()}</span>
+               </p>
+             </div>
+
+             <div className="flex flex-col gap-4">
+                <select 
+                  value={selectedDeckForBattle}
+                  onChange={(e) => setSelectedDeckForBattle(Number(e.target.value))}
+                  className="w-full bg-stone-800 border border-stone-600 text-stone-200 px-3 py-3 rounded focus:outline-none focus:border-red-500 cursor-pointer text-md font-bold"
+                >
+                  <option value={0}>第1部隊 (戦力: {calculateDeckPower(0).toLocaleString()})</option>
+                  <option value={1}>第2部隊 (戦力: {calculateDeckPower(1).toLocaleString()})</option>
+                  <option value={2}>第3部隊 (戦力: {calculateDeckPower(2).toLocaleString()})</option>
+                </select>
+                
+                <div className="flex gap-4">
+                  <button onClick={() => {
+                    setOccupiedLands(prev => prev.filter(id => id !== invasionEvent.land.id));
+                    
+                    // 放棄した領地を敵の勢力に変更する
+                    let newOwner = '群';
+                    const factionMatch = Object.values(FACTIONS).find(f => invasionEvent.enemyName.startsWith(f));
+                    if (factionMatch) newOwner = factionMatch;
+
+                    setLANDS(prev => prev.map(l => l.id === invasionEvent.land.id ? { ...l, owner: newOwner } : l));
+
+                    addLog(`【放棄】防衛を諦め、${invasionEvent.land.name}を ${newOwner} に明け渡した...`, 'error');
+                    
+                    // 放棄した領地が居城だった場合はゲームオーバー
+                    if (invasionEvent.land.id === capitalLandId) {
+                      setTimeout(() => setIsGameOver(true), 1000);
+                      addLog(`【御家滅亡】居城たる${invasionEvent.land.name}を明け渡し、我が軍は瓦解しました...`, 'error');
+                    }
+
+                    setInvasionEvent(null);
+                  }} className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 text-stone-400 font-bold rounded border border-stone-600 transition-colors">
+                    放棄する
+                  </button>
+                  <button onClick={() => startBattle(invasionEvent.land, selectedDeckForBattle, true, invasionEvent.enemyPower, invasionEvent.enemyName)} className="flex-1 py-3 bg-red-800 hover:bg-red-700 text-white font-bold rounded shadow-lg transition-colors border border-red-500 animate-pulse">
+                    迎撃する！
+                  </button>
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ＝＝＝ ガチャ結果演出モーダル ＝＝＝ */}
+      {gachaResult && (
+        <div className="absolute inset-0 z-[70] bg-black/95 flex flex-col items-center justify-center overflow-hidden backdrop-blur-md">
+          <h2 className="text-4xl md:text-5xl font-bold text-amber-500 mb-8 animate-fade-in drop-shadow-[0_0_15px_rgba(245,158,11,0.8)] tracking-widest">
+            {gachaResult.length > 1 ? '十連登用 結果' : '登用 結果'}
+          </h2>
+          <div className="flex flex-wrap justify-center gap-4 md:gap-6 max-w-5xl overflow-y-auto p-4 custom-scrollbar">
+            {gachaResult.map((g, idx) => {
+              const isRare = g.rarity >= 4;
+              const borderColor = g.rarity === 5 ? 'border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.8)]' : 
+                                 g.rarity === 4 ? 'border-purple-400 shadow-[0_0_20px_rgba(192,132,252,0.6)]' : 
+                                 g.rarity === 3 ? 'border-blue-400' :
+                                 g.rarity === 2 ? 'border-green-400' : 'border-stone-500';
+              return (
+                <div key={idx} className={`relative w-28 h-40 md:w-40 md:h-56 rounded-lg overflow-hidden border-4 ${borderColor} opacity-0 animate-pop-in bg-stone-800`} style={{ animationDelay: `${idx * 0.15}s`, animationFillMode: 'forwards' }}>
+                   <img src={`https://placehold.jp/30/2d2924/d97706/200x300.png?text=${encodeURIComponent(g.name)}`} alt={g.name} className="w-full h-full object-cover opacity-80 mix-blend-overlay" />
+                   
+                   {/* 背景の透かし家紋 */}
+                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
+                     <FactionKamon faction={g.faction} className={`w-20 h-20 md:w-32 md:h-32 ${isRare ? 'text-amber-400' : 'text-stone-300'}`} />
+                   </div>
+
+                   {/* 右上の小さな家紋バッジ */}
+                   <div className="absolute top-1.5 right-1.5 md:top-2 md:right-2 bg-black/60 p-1 rounded-full border border-stone-600/50 backdrop-blur-sm shadow-md">
+                     <FactionKamon faction={g.faction} className={`w-4 h-4 md:w-6 md:h-6 ${isRare ? 'text-amber-400 drop-shadow-md' : 'text-stone-300'}`} />
+                   </div>
+
+                   <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black via-black/90 to-transparent p-2 flex flex-col items-center pt-8">
+                      <RarityStars count={g.rarity} />
+                      <span className={`font-bold mt-1 text-sm md:text-lg whitespace-nowrap ${g.rarity === 5 ? 'text-amber-400' : g.rarity === 4 ? 'text-purple-300' : 'text-stone-200'}`}>{g.name}</span>
+                   </div>
+                   {isRare && (
+                     <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/30 to-transparent animate-flash mix-blend-overlay pointer-events-none"></div>
+                   )}
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={() => setGachaResult(null)} className="mt-12 px-10 py-4 bg-amber-800 hover:bg-amber-700 text-white font-bold text-xl md:text-2xl rounded-full border-2 border-amber-500 transition-colors opacity-0 animate-fade-in shadow-[0_0_20px_rgba(245,158,11,0.5)]" style={{ animationDelay: '1.5s', animationFillMode: 'forwards' }}>
+            確認して戻る
+          </button>
+        </div>
+      )}
+
+      {/* ＝＝＝ 一揆イベントモーダル ＝＝＝ */}
+      {ikkiEvent && (
+        <div className="absolute inset-0 z-[60] bg-red-950/90 flex flex-col items-center justify-center overflow-hidden backdrop-blur-sm animate-fade-in">
+          <div className="bg-stone-900 border-4 border-red-700 p-8 rounded-xl max-w-lg text-center shadow-[0_0_50px_rgba(220,38,38,0.5)]">
+             <Flame className="w-20 h-20 text-red-500 mx-auto mb-4 animate-pulse" />
+             <h2 className="text-4xl font-bold text-red-500 mb-6 tracking-widest">一揆勃発！</h2>
+             <p className="text-lg text-stone-300 mb-2">御館様の度重なる重税に耐えかね、</p>
+             <p className="text-lg text-stone-300 mb-6">領民たちが武装蜂起いたしました！</p>
+             
+             <div className="bg-red-900/30 border border-red-800 p-4 rounded-lg mb-8 text-left inline-block w-full">
+               <h3 className="font-bold text-red-400 mb-2 border-b border-red-800 pb-1">【被害報告】</h3>
+               <ul className="text-stone-300 space-y-2">
+                 {ikkiEvent.landName && (
+                   <li className="flex items-center gap-2"><MapIcon className="w-4 h-4 text-red-400"/> 領地「{ikkiEvent.landName}」が奪われました。</li>
+                 )}
+                 {ikkiEvent.lostCopper > 0 && (
+                   <li className="flex items-center gap-2"><Coins className="w-4 h-4 text-yellow-500"/> 国庫から銅銭 {ikkiEvent.lostCopper.toLocaleString()} が略奪されました。</li>
+                 )}
+               </ul>
+             </div>
+
+             <button onClick={() => setIkkiEvent(null)} className="px-8 py-3 bg-red-800 hover:bg-red-700 text-white font-bold rounded shadow-lg transition-colors border border-red-500">
+               鎮圧を命じる
+             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ＝＝＝ 合戦風景（バトルシーン）モーダル ＝＝＝ */}
+      {battleScene && (
+        <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center overflow-hidden">
+          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/black-paper.png')] opacity-30"></div>
+          
+          {battleScene.phase === 'intro' && (
+            <div className="text-center z-10 animate-fade-in">
+              <h1 className={`text-5xl md:text-7xl font-bold tracking-widest drop-shadow-[0_0_15px_rgba(220,38,38,0.8)] mb-8 ${battleScene.isDefense ? 'text-amber-500' : 'text-red-600'}`}>
+                {battleScene.isDefense ? '防衛戦、開始！' : 'いざ、合戦！'}
+              </h1>
+              <div className="flex items-center justify-center gap-12 text-2xl md:text-4xl font-bold">
+                <div className="text-blue-400 flex flex-col items-center"><span className="text-sm text-stone-400 mb-2">自軍戦力</span>{battleScene.deckPower.toLocaleString()}</div>
+                <div className="text-white text-5xl font-mono px-8">VS</div>
+                <div className="text-red-400 flex flex-col items-center"><span className="text-sm text-stone-400 mb-2">{battleScene.enemyName}</span>{battleScene.enemyPower.toLocaleString()}</div>
+              </div>
+            </div>
+          )}
+
+          {battleScene.phase === 'clash' && (
+            <div className="w-full h-full relative flex items-center justify-center z-10 animate-shake overflow-hidden">
+               <div className="absolute inset-0 bg-stone-900 opacity-80 mix-blend-multiply"></div>
+               <div className="absolute inset-0 bg-gradient-to-t from-yellow-900/50 to-transparent"></div>
+               
+               <div className="absolute left-0 w-1/2 h-full flex flex-col justify-center items-end pr-4 md:pr-12 gap-6 z-20">
+                 {battleScene.activeDeck.map((g, idx) => (
+                   <div key={idx} className="flex items-center gap-2 md:gap-4 animate-charge-right" style={{ animationDelay: `${idx * 0.15}s` }}>
+                     <div className="bg-blue-900 border-2 border-blue-400 px-4 py-2 rounded-lg shadow-[0_0_20px_rgba(59,130,246,0.5)]">
+                       <span className="text-lg md:text-2xl font-bold text-white whitespace-nowrap">{g.name}</span>
+                       <span className="text-xs md:text-sm block text-blue-200 text-center mt-1 bg-blue-950 rounded">{g.troop.name}隊</span>
+                     </div>
+                     <Sword className="w-8 h-8 md:w-12 md:h-12 text-blue-300 transform rotate-90" />
+                   </div>
+                 ))}
+               </div>
+
+               <div className="absolute right-0 w-1/2 h-full flex flex-col justify-center items-start pl-4 md:pl-12 gap-6 z-20">
+                 {[...Array(3)].map((_, idx) => (
+                   <div key={`enemy-${idx}`} className="flex items-center gap-2 md:gap-4 animate-charge-left flex-row-reverse" style={{ animationDelay: `${idx * 0.15}s` }}>
+                     <div className="bg-red-950 border-2 border-red-500 px-4 py-2 rounded-lg shadow-[0_0_20px_rgba(239,68,68,0.5)]">
+                       <span className="text-lg md:text-2xl font-bold text-red-100 whitespace-nowrap">{battleScene.enemyName.substring(0, 5)}...</span>
+                       <span className="text-xs md:text-sm block text-red-300 text-center mt-1 bg-red-900 rounded">敵軍</span>
+                     </div>
+                     <Shield className="w-8 h-8 md:w-12 md:h-12 text-red-400" />
+                   </div>
+                 ))}
+               </div>
+
+               <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+                 <div className="relative flex items-center justify-center">
+                   <div className="absolute bg-yellow-600 blur-3xl opacity-60 animate-pulse w-96 h-96 rounded-full"></div>
+                   <div className="absolute flex gap-4">
+                     <Sword className="w-32 h-32 md:w-48 md:h-48 text-yellow-100 animate-clash-sparks mix-blend-overlay drop-shadow-[0_0_30px_rgba(255,255,255,1)]" />
+                     <Sword className="w-32 h-32 md:w-48 md:h-48 text-red-200 animate-clash-sparks-reverse mix-blend-overlay drop-shadow-[0_0_30px_rgba(255,0,0,1)] scale-x-[-1]" />
+                   </div>
+                   <h2 className="absolute text-6xl md:text-8xl font-black text-white italic drop-shadow-[0_0_20px_rgba(255,0,0,0.8)] animate-flash z-40">激突</h2>
+                 </div>
+               </div>
+            </div>
+          )}
+
+          {battleScene.phase === 'result' && (
+            <div className="z-20 text-center animate-pop-in bg-stone-900/90 p-12 rounded-xl border-4 border-stone-700 shadow-[0_0_50px_rgba(0,0,0,0.8)]">
+              <h1 className={`text-6xl font-bold mb-6 ${battleScene.isVictory ? 'text-amber-400 drop-shadow-[0_0_20px_rgba(245,158,11,0.6)]' : battleScene.isDraw ? 'text-stone-300' : 'text-red-600'}`}>
+                {battleScene.resultText}
+              </h1>
+              <p className="text-xl text-stone-300 mb-8">
+                {battleScene.isVictory ? 
+                  (battleScene.isDefense ? `見事、${battleScene.land.name}の防衛に成功いたしました！` : `見事、${battleScene.land.name}の制圧に成功いたしました！`) 
+                  : `無念...兵を退き、再起を図りましょう。`}
+              </p>
+              <button onClick={closeBattleScene} className="px-8 py-4 bg-stone-800 hover:bg-stone-700 border-2 border-stone-500 text-white font-bold text-xl rounded transition-all">
+                本陣へ帰還
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ヘッダー */}
+      <header className="bg-gradient-to-r from-stone-950 via-stone-900 to-stone-950 border-b-2 border-amber-900/50 p-4 flex justify-between items-center shadow-lg z-10 shrink-0">
+        <h1 className="text-2xl font-bold text-red-600 tracking-widest drop-shadow-md">戦国真戦 <span className="text-sm text-stone-400">~布武の道~</span></h1>
+        
+        <div className="flex items-center gap-4 md:gap-6">
+          <div className="flex items-center gap-3 bg-stone-900/80 px-4 py-1.5 rounded-full border border-stone-700 shadow-inner">
+            <button onClick={handleSave} disabled={isSaving || !dataLoaded} className="text-stone-300 hover:text-amber-400 transition-colors flex items-center gap-1" title="進行状況を保存">
+              {isSaving ? <Activity className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              <span className="text-xs font-bold">記帳</span>
+            </button>
+            <div className="w-px h-4 bg-stone-600"></div>
+            <button onClick={() => setShowResetModal(true)} className="text-stone-300 hover:text-red-400 transition-colors flex items-center gap-1" title="最初からやり直す">
+              <RefreshCw className="w-4 h-4" />
+              <span className="text-xs font-bold">初期化</span>
+            </button>
+            <div className="w-px h-4 bg-stone-600"></div>
+            <button onClick={toggleBgm} className="text-stone-300 hover:text-amber-400 transition-colors" title="BGMのオン/オフ">
+              {isBgmPlaying ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+              )}
+            </button>
+            <input type="range" min="0" max="1" step="0.05" value={bgmVolume} onChange={(e) => setBgmVolume(parseFloat(e.target.value))} className="w-16 h-1.5 bg-stone-700 rounded-lg appearance-none cursor-pointer accent-amber-500"/>
+          </div>
+          <div className="flex items-center gap-2 bg-orange-950/40 px-3 py-1.5 rounded-lg border border-orange-900/50 shadow-sm">
+            <button 
+              onClick={handleTaxCollection} 
+              disabled={taxCooldown > 0}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold transition-colors ${taxCooldown > 0 ? 'bg-stone-800 text-stone-500 border border-stone-700' : 'bg-red-900 hover:bg-red-800 text-red-100 border border-red-700 shadow-sm'}`}
+            >
+              {taxCooldown > 0 ? `徴税(${taxCooldown}s)` : '徴税(搾取)'}
+            </button>
+            <Coins className="w-5 h-5 text-yellow-500 ml-1" />
+            <span className="font-mono text-lg text-yellow-100">{copper.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center gap-2 bg-yellow-950/40 px-4 py-1.5 rounded-lg border border-yellow-800/50 shadow-sm">
+            <Crown className="w-5 h-5 text-amber-400" />
+            <span className="font-mono text-lg text-amber-300 font-bold">{gold.toLocaleString()}</span>
+          </div>
+        </div>
+      </header>
+
+      {/* メインエリア */}
+      <div className="flex flex-1 overflow-hidden">
+        
+        {/* 左側：メインコンテンツ */}
+        <main className="flex-1 flex flex-col p-6 overflow-y-auto bg-[url('https://www.transparenttextures.com/patterns/rice-paper-2.png')] bg-opacity-10 blend-overlay">
+          
+          {/* タブナビゲーション */}
+          <div className="flex gap-2 mb-6 border-b-2 border-stone-700 pb-2 overflow-x-auto custom-scrollbar shrink-0">
+            {['map', 'deck', 'gacha', 'item', 'shop', 'alliance', 'diplomacy', 'advisor'].map(tab => {
+              const labels = { map: '出陣(地図)', deck: '編制/育成', gacha: '登用', item: '道具', shop: '商店', alliance: '同盟', diplomacy: '外交', advisor: '軍師' };
+              const icons = { map: MapIcon, deck: Tent, gacha: Users, item: Package, shop: Store, alliance: Flag, diplomacy: Handshake, advisor: Sparkles };
+              
+              const tabStyles = {
+                map: { active: 'bg-red-900 text-white border-red-500 shadow-[0_0_15px_rgba(220,38,38,0.5)]', inactive: 'bg-stone-800/80 border-stone-700 text-stone-400 hover:bg-red-950/40 hover:text-red-300 hover:border-red-900' },
+                deck: { active: 'bg-blue-900 text-white border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]', inactive: 'bg-stone-800/80 border-stone-700 text-stone-400 hover:bg-blue-950/40 hover:text-blue-300 hover:border-blue-900' },
+                gacha: { active: 'bg-yellow-700 text-white border-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.4)]', inactive: 'bg-stone-800/80 border-stone-700 text-stone-400 hover:bg-yellow-900/30 hover:text-yellow-200 hover:border-yellow-700' },
+                item: { active: 'bg-green-800 text-white border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]', inactive: 'bg-stone-800/80 border-stone-700 text-stone-400 hover:bg-green-950/40 hover:text-green-300 hover:border-green-800' },
+                shop: { active: 'bg-purple-900 text-white border-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.4)]', inactive: 'bg-stone-800/80 border-stone-700 text-stone-400 hover:bg-purple-950/40 hover:text-purple-300 hover:border-purple-800' },
+                alliance: { active: 'bg-orange-800 text-white border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.4)]', inactive: 'bg-stone-800/80 border-stone-700 text-stone-400 hover:bg-orange-950/40 hover:text-orange-300 hover:border-orange-800' },
+                diplomacy: { active: 'bg-emerald-800 text-white border-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.4)]', inactive: 'bg-stone-800/80 border-stone-700 text-stone-400 hover:bg-emerald-950/40 hover:text-emerald-300 hover:border-emerald-800' },
+                advisor: { active: 'bg-cyan-900 text-white border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.4)]', inactive: 'bg-stone-800/80 border-stone-700 text-stone-400 hover:bg-cyan-950/40 hover:text-cyan-300 hover:border-cyan-800' },
+              };
+
+              const Icon = icons[tab];
+              const style = tabStyles[tab];
+
+              return (
+               <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-1 min-w-[110px] flex justify-center items-center gap-2 px-2 py-3 rounded-t-lg font-bold text-sm md:text-md transition-all border-b-4 ${activeTab === tab ? style.active + ' scale-105 transform origin-bottom z-10' : style.inactive}`}>
+                 <Icon className="w-4 h-4 md:w-5 md:h-5" /> {labels[tab]}
+               </button>
+              )
+            })}
+          </div>
+
+          {activeBuff && activeTab === 'map' && (
+            <div className={`border p-4 rounded-lg mb-6 flex items-center justify-center gap-3 font-bold animate-pulse shadow-lg z-20 shrink-0 ${activeBuff === 'drum' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-green-900/50 border-green-500 text-green-200'}`}>
+              <Flame className="w-6 h-6"/>【{activeBuff === 'drum' ? '陣太鼓' : '法螺貝'} 発動中】次の出陣で自軍の戦力が{activeBuff === 'drum' ? '1.5' : '1.2'}倍になるぞ！
+            </div>
+          )}
+
+          {/* コンテンツ: 出陣 (地図表示) */}
+          {activeTab === 'map' && (
+            <div className="h-full flex flex-col relative overflow-hidden bg-stone-950 rounded-xl border border-stone-700 shadow-inner">
+               
+               {/* 諸城一覧パネル (左側) */}
+               {showCastleList ? (
+                 <div className="absolute left-4 top-4 bottom-4 w-40 md:w-52 bg-stone-900/90 border border-stone-700 rounded-lg p-3 flex flex-col z-40 shadow-2xl backdrop-blur-md">
+                   <div className="flex justify-between items-center mb-3 border-b border-stone-700 pb-2">
+                     <h3 className="text-stone-300 font-bold text-xs md:text-sm flex items-center gap-2">
+                       <MapIcon className="w-4 h-4 text-amber-500"/> 諸城一覧から飛ぶ
+                     </h3>
+                     <button onClick={() => setShowCastleList(false)} className="text-stone-500 hover:text-stone-200 p-1 rounded transition-colors">
+                       <X className="w-4 h-4" />
+                     </button>
+                   </div>
+                   <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-1.5">
+                     {[...LANDS].sort((a,b) => a.level - b.level).map(land => {
+                       const isOccupied = occupiedLands.includes(land.id);
+                       const reachable = isReachable(land.id);
+                       const isAlly = diplomacyRelations[land.owner] === 'alliance';
+                       const isCapital = land.id === capitalLandId;
+                       const styleInfo = isOccupied ? PLAYER_COLOR : (FACTION_COLORS[land.owner] || FACTION_COLORS['群']);
+                       return (
+                         <button 
+                           key={land.id} 
+                           onClick={() => reachable && jumpToCastle(land)}
+                           disabled={!reachable}
+                           className={`text-left text-xs px-2 py-2 rounded transition-colors flex justify-between items-center border shadow-sm ${!reachable ? 'opacity-40 cursor-not-allowed bg-stone-900 border-stone-800' : selectedLand?.id === land.id ? 'bg-amber-900/50 border-amber-500 text-amber-200' : isOccupied ? 'bg-rose-950/60 border-rose-500/80 text-rose-200 hover:bg-rose-900/80' : isAlly ? 'bg-emerald-950/40 border-emerald-900/50 text-emerald-300 hover:bg-emerald-900/60' : 'bg-stone-800 border-stone-600 text-stone-200 hover:bg-stone-700'}`}
+                         >
+                           <span className={`truncate flex items-center gap-2 ${reachable ? styleInfo.text : ''}`}>
+                             <span className={`w-3 h-3 rounded-full border border-white/50 shadow-sm ${styleInfo.bg}`}></span>
+                             {isCapital && <Crown className="w-3 h-3 text-amber-400 absolute -ml-4" />}
+                             {land.name.split(' ')[0]}
+                           </span>
+                           <span className="text-[10px] opacity-70 font-mono">Lv.{land.level}</span>
+                         </button>
+                       );
+                     })}
+                   </div>
+                 </div>
+               ) : (
+                 <button 
+                   onClick={() => setShowCastleList(true)}
+                   className="absolute left-4 top-4 z-40 p-3 bg-stone-900/90 border border-stone-700 rounded-lg shadow-2xl backdrop-blur-md text-stone-300 hover:text-white flex items-center gap-2 font-bold text-sm transition-colors"
+                 >
+                   <MapIcon className="w-5 h-5 text-amber-500"/> 諸城一覧を開く
+                 </button>
+               )}
+
+               <div className="absolute top-4 right-4 z-40 flex flex-col gap-2 bg-stone-900/80 p-2 rounded-lg border border-stone-700 backdrop-blur shadow-lg">
+                 <button onClick={handleZoomIn} disabled={mapScale >= 2.0} className="p-2 bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-stone-200 rounded transition-colors" title="拡大"><ZoomIn className="w-5 h-5"/></button>
+                 <div className="text-center text-xs font-mono text-stone-400 font-bold">{Math.round(mapScale * 100)}%</div>
+                 <button onClick={handleZoomOut} disabled={mapScale <= 0.1} className="p-2 bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-stone-200 rounded transition-colors" title="縮小"><ZoomOut className="w-5 h-5"/></button>
+               </div>
+
+               <div 
+                 ref={mapContainerRef} 
+                 className={`flex-1 overflow-auto relative custom-scrollbar bg-stone-950 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                 onMouseDown={handleMapMouseDown}
+                 onMouseMove={handleMapMouseMove}
+                 onMouseUp={handleMapMouseUp}
+                 onMouseLeave={handleMapMouseUp}
+               >
+                 <div style={{ width: `${12800 * mapScale}px`, height: `${9600 * mapScale}px` }} className="transition-all duration-300 origin-top-left">
+                   <div style={{ transform: `scale(${mapScale})`, transformOrigin: '0 0', width: '12800px', height: '9600px' }} className="relative bg-[#1c1a17] transition-transform duration-300">
+                      <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#d97706 2px, transparent 2px)', backgroundSize: '100px 100px' }}></div>
+
+                    <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none" strokeLinejoin="round" strokeLinecap="round">
+                       <filter id="land-shadow">
+                          <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor="#000" floodOpacity="0.9"/>
+                       </filter>
+                       {/* 本州 */}
+                       <path d="M23,68 L28,64 L32,62 L40,60 L47,58 L50,55 L53,50 L55,54 L54,56 L58,50 L63,45 L68,35 L73,20 L75,18 L76,21 L78,19 L80,22 L80,25 L78,35 L76,40 L74,45 L72,50 L70,55 L72,62 L68,63 L66,60 L65,64 L64,62 L60,63 L57,65 L55,68 L55,74 L53,78 L50,81 L47,80 L44,76 L43,70 L40,69 L35,69 L30,70 L25,70 Z" fill="#2d2924" stroke="#4a4235" strokeWidth="0.6" filter="url(#land-shadow)"/>
+                       {/* 九州 */}
+                       <path d="M19,72 L22,73 L24,75 L22,76 L24,79 L23,85 L20,87 L19,85 L18,80 L14,78 L15,75 L17,73 Z" fill="#2d2924" stroke="#4a4235" strokeWidth="0.4" filter="url(#land-shadow)"/>
+                       {/* 四国 */}
+                       <path d="M35,74 L40,73 L42,75 L43,78 L41,82 L39,81 L34,83 L32,80 L33,76 Z" fill="#2d2924" stroke="#4a4235" strokeWidth="0.4" filter="url(#land-shadow)"/>
+                       {/* 北海道 */}
+                       <path d="M76,16 L78,13 L81,14 L85,15 L88,16 L92,14 L95,10 L92,8 L94,5 L90,4 L85,6 L80,9 L76,11 Z" fill="#2d2924" stroke="#4a4235" strokeWidth="0.4" filter="url(#land-shadow)"/>
+                    </svg>
+
+                    <div className="absolute top-[15%] left-[-5%] w-[3200px] h-[320px] bg-amber-500/10 blur-3xl transform -skew-x-[45deg] pointer-events-none rounded-full"></div>
+                    <div className="absolute top-[45%] right-[5%] w-[4800px] h-[400px] bg-amber-500/10 blur-3xl transform -skew-x-[45deg] pointer-events-none rounded-full"></div>
+                    <div className="absolute top-[80%] left-[25%] w-[3200px] h-[320px] bg-amber-500/10 blur-3xl transform -skew-x-[45deg] pointer-events-none rounded-full"></div>
+
+                    <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full pointer-events-none z-10" preserveAspectRatio="none">
+                      {/* 海路 */}
+                      {hasNavy && occupiedLands.some(id => LANDS.find(l => l.id === id)?.isPort) && (
+                        LANDS.filter(l => l.isPort).map(port => {
+                          const basePortId = occupiedLands.find(id => LANDS.find(l => l.id === id)?.isPort);
+                          const basePort = LANDS.find(l => l.id === basePortId);
+                          if (!basePort || basePort.id === port.id) return null;
+                          return (
+                            <line key={`navy-${port.id}`} x1={basePort.x} y1={basePort.y} x2={port.x} y2={port.y} stroke="#06b6d4" strokeWidth="0.15" strokeDasharray="0.3, 0.3" opacity="0.6" className="animate-pulse"/>
+                          );
+                        })
+                      )}
+                      
+                      {/* 陸路 */}
+                      {ROUTE_CONNECTIONS.map(([a, b], idx) => {
+                        const l1 = LANDS.find(l => l.id === a);
+                        const l2 = LANDS.find(l => l.id === b);
+                        if (!l1 || !l2) return null;
+                        
+                        const aOccupied = occupiedLands.includes(a);
+                        const bOccupied = occupiedLands.includes(b);
+                        const aAlly = diplomacyRelations[l1.owner] === 'alliance';
+                        const bAlly = diplomacyRelations[l2.owner] === 'alliance';
+                        
+                        let strokeColor = "rgba(255, 255, 255, 0.2)";
+                        let strokeWidth = "0.2";
+                        let strokeDasharray = "0.6, 0.6";
+                        let strokeClass = "";
+
+                        if ((aOccupied || aAlly) && (bOccupied || bAlly)) {
+                          strokeColor = "#ef4444"; // red-500
+                          if (aAlly || bAlly) strokeColor = "#10b981"; // emerald-500
+                          strokeWidth = "0.4";
+                          strokeDasharray = "none";
+                        } else if (aOccupied || bOccupied || aAlly || bAlly) {
+                          strokeColor = "#f59e0b"; // amber-500
+                          if (!aOccupied && !bOccupied) strokeColor = "#34d399";
+                          strokeWidth = "0.3";
+                          strokeClass = "animate-pulse";
+                        }
+
+                        return (
+                          <line key={idx} x1={l1.x} y1={l1.y} x2={l2.x} y2={l2.y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray={strokeDasharray} className={strokeClass}/>
+                        );
+                      })}
+                    </svg>
+
+                    {LANDS.map((land) => {
+                      const isOccupied = occupiedLands.includes(land.id);
+                      const isSelected = selectedLand?.id === land.id;
+                      const reachable = isReachable(land.id);
+                      const isAlly = diplomacyRelations[land.owner] === 'alliance';
+                      const isCapital = land.id === capitalLandId;
+                      
+                      const styleInfo = isOccupied ? PLAYER_COLOR : (FACTION_COLORS[land.owner] || FACTION_COLORS['群']);
+                      const reachabilityClass = (isOccupied || isAlly || reachable) ? '' : 'brightness-75 opacity-70';
+
+                      return (
+                        <div 
+                          key={land.id} 
+                          onClick={() => handleCastleClick(land)}
+                          className={`absolute w-20 h-20 md:w-32 md:h-32 -ml-10 -mt-10 md:-ml-16 md:-mt-16 flex items-center justify-center transition-all ${reachable || isOccupied ? 'cursor-pointer' : 'cursor-not-allowed'} ${isSelected ? 'scale-125 z-30' : 'hover:scale-110 z-20'} ${styleInfo.text} ${reachabilityClass}`}
+                          style={{ left: `${land.x}%`, top: `${land.y}%` }}
+                        >
+                          {/* 自軍領地の場合は光の波紋を追加 */}
+                          {isOccupied && (
+                            <div className="absolute inset-0 rounded-full animate-ping bg-rose-500 opacity-40 blur-xl"></div>
+                          )}
+
+                          {/* 居城の王冠アイコン */}
+                          {isCapital && (
+                            <div className="absolute -top-8 md:-top-10 left-1/2 -translate-x-1/2 animate-bounce z-40">
+                              <Crown className="w-6 h-6 md:w-8 md:h-8 text-amber-400 drop-shadow-[0_0_15px_rgba(251,191,36,1)]" />
+                            </div>
+                          )}
+                          
+                          <div className={`relative flex items-center justify-center w-full h-full rounded-full border-[6px] md:border-[8px] transition-all text-white ${styleInfo.bg} ${isAlly ? 'border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.8)]' : styleInfo.border} ${isSelected || isOccupied ? styleInfo.glow : 'hover:shadow-lg hover:border-white'}`}>
+                             {land.level >= 10 ? <Castle className="w-16 h-16 drop-shadow-md" /> : 
+                              land.level >= 7 ? <Castle className="w-12 h-12" /> : 
+                              land.level >= 4 ? <Tent className="w-10 h-10" /> : 
+                              <MapIcon className="w-10 h-10" />}
+                          </div>
+                          
+                          {/* 港アイコンの表示 */}
+                          {land.isPort && (
+                            <div className={`absolute -top-3 -right-3 rounded-full p-1 shadow-md border ${hasNavy ? 'bg-cyan-900 border-cyan-500' : 'bg-stone-800 border-stone-600'}`}>
+                              <Anchor className={`w-3 h-3 md:w-4 md:h-4 ${hasNavy ? 'text-cyan-300' : 'text-stone-500'}`} />
+                            </div>
+                          )}
+
+                          <div className={`absolute left-full ml-4 top-1/2 -translate-y-1/2 px-3 py-2 rounded-md shadow-2xl border-2 font-bold text-lg md:text-xl transition-colors whitespace-nowrap flex flex-col items-center ${styleInfo.bg} ${isAlly ? 'border-emerald-400 text-emerald-100' : styleInfo.border + ' ' + styleInfo.text}`}>
+                            <span className="text-[10px] md:text-xs opacity-90 mb-0.5 border-b border-white/30 pb-0.5 w-full text-center">
+                              {isCapital ? '👑 居城' : isOccupied ? '自軍領地' : isAlly ? '🤝 同盟国' : land.owner}
+                            </span>
+                            <span className="drop-shadow-md">{land.name.split(' ')[0]}</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                   </div>
+                 </div>
+               </div>
+
+               {selectedLand && (
+                 <div className="absolute bottom-0 left-0 right-0 bg-stone-900/95 border-t-2 border-red-600 p-6 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] backdrop-blur-md animate-slide-up z-40">
+                   <div className="flex justify-between items-start flex-wrap gap-4">
+                     <div className="flex-1 min-w-[300px]">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className={`px-3 py-1 rounded text-xs font-bold ${occupiedLands.includes(selectedLand.id) ? 'bg-red-700 text-red-100' : 'bg-stone-700 text-stone-300'}`}>
+                            {occupiedLands.includes(selectedLand.id) ? '占領済み' : `未占領 Lv.${selectedLand.level}`}
+                          </span>
+                          <h3 className="text-3xl font-bold text-white">{selectedLand.name}</h3>
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold border ${occupiedLands.includes(selectedLand.id) ? 'bg-red-950 border-red-500 text-red-300' : (FACTION_COLORS[selectedLand.owner]?.bg || 'bg-stone-800') + ' ' + (FACTION_COLORS[selectedLand.owner]?.border || 'border-stone-500') + ' ' + (FACTION_COLORS[selectedLand.owner]?.text || 'text-stone-300')}`}>
+                             {capitalLandId === selectedLand.id ? '👑 居城' : occupiedLands.includes(selectedLand.id) ? '自軍領地' : diplomacyRelations[selectedLand.owner] === 'alliance' ? '🤝 同盟国' : `${selectedLand.owner} 支配`}
+                          </span>
+                          <button onClick={() => setSelectedLand(null)} className="ml-auto p-2 bg-stone-800 rounded hover:bg-stone-700"><span className="text-stone-400 text-lg">閉じる</span></button>
+                        </div>
+                        <p className="text-stone-400 text-md mb-2">守備軍兵力: <span className="font-mono text-red-400 text-2xl font-bold">{selectedLand.power.toLocaleString()}</span></p>
+                        
+                        <div className="flex gap-4 text-md text-stone-300 mb-2">
+                          <span className="flex items-center gap-1"><Sword className="w-5 h-5 text-blue-400"/> EXP +{selectedLand.exp}</span>
+                          {!occupiedLands.includes(selectedLand.id) && (
+                            <>
+                              <span className="flex items-center gap-1"><Crown className="w-5 h-5 text-amber-400"/> 小判 +{selectedLand.goldReward}</span>
+                              <span className="flex items-center gap-1"><Coins className="w-5 h-5 text-yellow-500"/> 銅銭 +{selectedLand.reward}</span>
+                            </>
+                          )}
+                        </div>
+
+                        {/* 遷都ボタン */}
+                        {occupiedLands.includes(selectedLand.id) && capitalLandId !== selectedLand.id && (
+                          <button 
+                            onClick={() => {
+                              setCapitalLandId(selectedLand.id);
+                              addLog(`【遷都】本拠地を ${selectedLand.name} に移しました！`, 'success');
+                            }}
+                            className="w-full max-w-sm mt-2 py-2 rounded-lg font-bold text-sm bg-stone-800 text-stone-300 border border-stone-600 hover:bg-stone-700 transition-all shadow-md"
+                          >
+                            <Castle className="w-4 h-4 inline-block mr-1"/> ここを新しい「居城」に設定する
+                          </button>
+                        )}
+                        {capitalLandId === selectedLand.id && (
+                          <div className="w-full max-w-sm mt-2 py-2 rounded-lg font-bold text-sm bg-amber-900/40 text-amber-300 border border-amber-700/50 text-center shadow-inner">
+                            👑 現在の居城（奪われると敗北）
+                          </div>
+                        )}
+                     </div>
+                     
+                     <div className="w-full md:w-1/3 flex flex-col justify-end gap-2">
+                        <select 
+                          value={selectedDeckForBattle}
+                          onChange={(e) => setSelectedDeckForBattle(Number(e.target.value))}
+                          className="w-full bg-stone-800 border border-stone-600 text-stone-200 px-3 py-2 rounded focus:outline-none focus:border-red-500 cursor-pointer text-sm"
+                        >
+                          <option value={0}>第1部隊 (戦力: {calculateDeckPower(0).toLocaleString()})</option>
+                          <option value={1}>第2部隊 (戦力: {calculateDeckPower(1).toLocaleString()})</option>
+                          <option value={2}>第3部隊 (戦力: {calculateDeckPower(2).toLocaleString()})</option>
+                        </select>
+                        <button 
+                          onClick={() => { startBattle(selectedLand, selectedDeckForBattle, false); setSelectedLand(null); }}
+                          disabled={battlingLandId !== null || !isReachable(selectedLand.id) || diplomacyRelations[selectedLand.owner] === 'alliance'}
+                          className={`w-full py-4 rounded-lg font-bold text-xl flex justify-center items-center gap-2 border-2 transition-all shadow-lg 
+                            ${diplomacyRelations[selectedLand.owner] === 'alliance' ? 'bg-emerald-900 text-emerald-100 border-emerald-700 cursor-not-allowed'
+                            : !isReachable(selectedLand.id) ? 'bg-stone-800 text-stone-500 border-stone-700 cursor-not-allowed' 
+                            : occupiedLands.includes(selectedLand.id) ? 'bg-red-900 text-red-100 border-red-700 hover:bg-red-800' 
+                            : 'bg-amber-700 text-white border-amber-500 hover:bg-amber-600'}`}
+                        >
+                          {diplomacyRelations[selectedLand.owner] === 'alliance' ? <><Handshake className="w-6 h-6"/> 同盟国（不可侵）</>
+                          : !isReachable(selectedLand.id) ? <><Sword className="w-6 h-6"/> 進軍不可</> 
+                          : occupiedLands.includes(selectedLand.id) ? <><Sword className="w-6 h-6"/> 掃討する</> 
+                          : <><Sword className="w-6 h-6"/> 出陣する！</>}
+                        </button>
+                        {!isReachable(selectedLand.id) && diplomacyRelations[selectedLand.owner] !== 'alliance' && (
+                          <p className="text-center text-xs text-red-400 mt-1 font-bold">※自軍の領地と道が繋がっていません</p>
+                        )}
+                        {diplomacyRelations[selectedLand.owner] === 'alliance' && (
+                          <p className="text-center text-xs text-emerald-400 mt-1 font-bold">※同盟を破棄するまで攻撃できません</p>
+                        )}
+                     </div>
+                   </div>
+                 </div>
+               )}
+            </div>
+          )}
+
+          {/* コンテンツ: 外交（大名家） */}
+          {activeTab === 'diplomacy' && (
+            <div className="h-full flex flex-col relative overflow-hidden bg-stone-950 rounded-xl border border-stone-800 shadow-inner p-4 md:p-6">
+              <div className="mb-6 bg-gradient-to-r from-stone-900 to-stone-800 p-5 rounded-xl border border-stone-700 flex flex-col md:flex-row justify-between items-center gap-4 shadow-md">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2"><Handshake className="w-7 h-7 text-emerald-500"/> 外交 (大名家)</h2>
+                  <p className="text-stone-400 text-sm mt-1">他家と同盟を結び、不可侵条約や領地の通過、合戦時の「援軍」を獲得せよ。</p>
+                </div>
+                <div className="flex gap-4">
+                  <div className="bg-stone-950 px-4 py-2 rounded-xl border border-yellow-700/50 flex items-center gap-2 shadow-inner">
+                    <Crown className="w-5 h-5 text-amber-400" />
+                    <span className="font-mono text-xl font-bold text-amber-300">{gold.toLocaleString()}</span>
+                  </div>
+                  <div className="bg-stone-950 px-4 py-2 rounded-xl border border-yellow-700/50 flex items-center gap-2 shadow-inner">
+                    <Coins className="w-5 h-5 text-yellow-500" />
+                    <span className="font-mono text-xl font-bold text-yellow-400">{copper.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 pb-10">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {Object.values(FACTIONS)
+                    .filter(f => f !== '群' && LANDS.some(l => l.owner === f && !occupiedLands.includes(l.id)))
+                    .map(faction => {
+                      const isAlly = diplomacyRelations[faction] === 'alliance';
+                      const factionLands = LANDS.filter(l => l.owner === faction && !occupiedLands.includes(l.id)).length;
+                      const styleInfo = FACTION_COLORS[faction];
+
+                      return (
+                        <div key={faction} className={`bg-gradient-to-b from-stone-800 to-stone-900 border-2 p-5 rounded-xl flex flex-col shadow-lg transition-colors ${isAlly ? 'border-emerald-500' : 'border-stone-700 hover:border-stone-500'}`}>
+                          <div className="flex justify-between items-center mb-4 border-b border-stone-700 pb-3">
+                            <div className="flex items-center gap-3">
+                              <FactionKamon faction={faction} className={`w-10 h-10 ${styleInfo.text}`} />
+                              <span className="font-bold text-xl text-white">{faction}</span>
+                            </div>
+                            <span className={`text-xs px-3 py-1 rounded-full font-bold border ${isAlly ? 'bg-emerald-950 text-emerald-400 border-emerald-700' : 'bg-stone-950 text-stone-400 border-stone-700'}`}>
+                              {isAlly ? '同盟中' : '中立'}
+                            </span>
+                          </div>
+                          
+                          <p className="text-sm text-stone-400 mb-6 flex-1 bg-stone-950/50 p-3 rounded-lg border border-stone-800/50">
+                            残存領地: {factionLands} ヶ国<br/><br/>
+                            {isAlly ? '現在同盟を結んでおり、相互不可侵および領地の通過が可能です。合戦時に援軍が現れることもあります。' : '同盟を結ぶことで、敵の侵攻を防ぎつつ領地を通過でき、合戦で援軍を得られます。'}
+                          </p>
+
+                          {isAlly ? (
+                            <button onClick={() => breakAlliance(faction)} className="w-full bg-red-950 hover:bg-red-900 text-red-300 border border-red-800 hover:border-red-600 py-3 rounded-lg flex justify-center items-center gap-2 transition-all font-bold text-sm">
+                              <Sword className="w-4 h-4"/> 同盟を破棄する
+                            </button>
+                          ) : (
+                            <button onClick={() => negotiateAlliance(faction)} className="w-full bg-gradient-to-r from-emerald-900 to-emerald-800 hover:from-emerald-800 hover:to-emerald-700 border border-emerald-600 hover:border-emerald-400 text-emerald-100 py-3 rounded-lg flex justify-center items-center gap-2 transition-all font-bold shadow-md text-sm">
+                              <Handshake className="w-4 h-4"/> 同盟を結ぶ (小判1,000 / 銅銭20,000)
+                            </button>
+                          )}
+                        </div>
+                      );
+                  })}
+                  {Object.values(FACTIONS).filter(f => f !== '群' && LANDS.some(l => l.owner === f && !occupiedLands.includes(l.id))).length === 0 && (
+                    <div className="col-span-full text-center text-stone-500 py-10">外交可能な大名家は存在しませぬ。</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* コンテンツ: 編制・育成 */}
+          {activeTab === 'deck' && (
+            <div className="flex flex-col lg:flex-row gap-6 h-full min-h-0">
+              <div className="w-full lg:w-2/3 bg-stone-950 p-4 md:p-6 rounded-xl border border-stone-800 shadow-xl flex flex-col overflow-y-auto custom-scrollbar">
+                
+                <div className="flex gap-2 mb-4 shrink-0 overflow-x-auto custom-scrollbar pb-1">
+                  {[0, 1, 2].map(idx => (
+                    <button 
+                      key={idx} 
+                      onClick={() => setActiveDeckIndex(idx)} 
+                      className={`px-5 py-2.5 rounded-t-lg font-bold border-b-4 transition-colors whitespace-nowrap ${activeDeckIndex === idx ? 'bg-blue-900 text-white border-blue-400 shadow-lg' : 'bg-stone-800/80 text-stone-400 border-stone-700 hover:bg-stone-700 hover:text-stone-300'}`}
+                    >
+                      第{idx + 1}部隊
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex justify-between items-center mb-6 shrink-0 bg-stone-900 p-4 rounded-b-xl rounded-tr-xl border border-stone-800 shadow-md">
+                  <h2 className="text-xl font-bold text-stone-100 flex items-center gap-2"><Tent className="w-6 h-6 text-amber-500"/> 第{activeDeckIndex + 1}部隊</h2>
+                  <div className="bg-stone-950 px-4 py-2 rounded-lg border border-stone-700 shadow-inner flex items-center gap-2">
+                    <span className="text-stone-400 text-sm">部隊総合戦力</span>
+                    <span className="text-amber-400 font-bold text-xl">{calculateDeckPower(activeDeckIndex).toLocaleString()}</span>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-4 shrink-0">
+                  {['主将', '副将', '副将', '副将', '副将'].map((role, slotIdx) => {
+                    const uniqueId = decks[activeDeckIndex][slotIdx];
+                    const g = uniqueId ? ownedGenerals.find(og => og.uniqueId === uniqueId) || null : null;
+                    const weaponId = g ? equippedWeapons[g.uniqueId] : null;
+                    const weapon = weaponId ? MASTER_WEAPONS.find(w => w.id === weaponId) : null;
+
+                    return (
+                      <div key={slotIdx} className="bg-gradient-to-b from-stone-800 to-stone-900 rounded-xl p-3 border-2 border-stone-700 flex flex-col items-center min-h-[280px] relative shadow-lg hover:border-stone-500 transition-colors">
+                        <div className="absolute top-0 left-0 bg-stone-950 px-3 py-1 text-[10px] rounded-tl-xl rounded-br-xl text-stone-300 font-bold border-b border-r border-stone-700 shadow-sm">{role}</div>
+                        {g ? (
+                          <>
+                            <div className="mt-6 mb-2 bg-stone-950/50 px-2 py-1 rounded-full"><RarityStars count={g.rarity} /></div>
+                            <h3 className={`font-bold text-[15px] mb-1 text-center leading-tight ${g.rarity === 5 ? 'text-amber-400' : g.rarity === 4 ? 'text-purple-400' : g.rarity === 3 ? 'text-blue-300' : g.rarity === 2 ? 'text-green-400' : 'text-stone-300'}`}>
+                              {g.name}
+                              {(g.breakthrough > 0) && <span className="text-pink-400 text-xs ml-1 bg-pink-950/50 px-1 rounded-full">+{g.breakthrough}</span>}
+                            </h3>
+                            <p className="text-[11px] text-stone-400 mb-2">Lv.{g.level} / <span className="text-stone-300">{g.faction}</span></p>
+                            
+                            <div className={`text-xs font-bold px-3 py-1 rounded border shadow-sm mb-3 ${g.troop.color}`}>{g.troop.name}</div>
+
+                            <div 
+                              onClick={() => setShowWeaponModalFor(g.uniqueId)}
+                              className={`w-full mt-auto mb-3 p-2 rounded-lg border cursor-pointer transition-colors text-center text-xs flex flex-col items-center shadow-inner ${weapon ? 'bg-amber-900/30 border-amber-600 hover:bg-amber-900/50' : 'bg-stone-950 border-stone-700 hover:border-stone-500 border-dashed text-stone-500'}`}
+                            >
+                              {weapon ? (
+                                <>
+                                  <span className={`font-bold truncate w-full ${weapon.rarity===5?'text-amber-400':'text-purple-300'}`}>{weapon.name}</span>
+                                  <span className="text-[10px] text-stone-400 mt-0.5">武{weapon.atk} 知{weapon.int} 統{weapon.def}</span>
+                                </>
+                              ) : (
+                                <span className="flex items-center gap-1"><Sword className="w-3 h-3"/> + 装備</span>
+                              )}
+                            </div>
+
+                            <button onClick={() => removeFromDeck(activeDeckIndex, slotIdx)} className="text-xs bg-gradient-to-b from-red-800 to-red-900 hover:from-red-700 hover:to-red-800 text-white px-2 py-2 rounded-lg w-full border border-red-700 transition-colors font-bold shadow-md">
+                              部隊から外す
+                            </button>
+                          </>
+                        ) : (
+                          <div className="flex-1 flex flex-col items-center justify-center text-stone-500 text-xs text-center px-2 opacity-50">
+                            <Users className="w-8 h-8 mb-2" />
+                            右の一覧から<br/>武将を配属
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="w-full lg:w-1/3 bg-stone-950 p-4 md:p-6 rounded-xl border border-stone-800 shadow-xl flex flex-col min-h-[400px]">
+                <div className="flex flex-col gap-3 mb-4 border-b border-stone-800 pb-4 shrink-0">
+                  <h3 className="text-xl font-bold text-stone-200 flex justify-between items-center">
+                    <span className="flex items-center gap-2"><Users className="w-5 h-5 text-blue-400"/> 所持武将</span>
+                    <span className="text-sm bg-stone-900 px-3 py-1 rounded-full border border-stone-700 text-stone-400">{ownedGenerals.length}名</span>
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-stone-500 font-bold whitespace-nowrap">陣営:</span>
+                    <select 
+                      value={filterFaction}
+                      onChange={(e) => setFilterFaction(e.target.value)}
+                      className="flex-1 bg-stone-900 border border-stone-700 text-stone-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-amber-500 cursor-pointer shadow-inner"
+                    >
+                      <option value="ALL">すべての陣営</option>
+                      {Object.values(FACTIONS).map(f => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                  {ownedGenerals
+                    .filter(g => filterFaction === 'ALL' || g.faction === filterFaction)
+                    .sort((a, b) => b.rarity - a.rarity || b.level - a.level)
+                    .map(g => {
+                    const equippedDeckIdx = getEquippedDeckIndex(g.uniqueId);
+                    const isEquipped = equippedDeckIdx !== -1;
+                    
+                    const canBreakthrough = !isEquipped && (g.breakthrough || 0) < 5 && ownedGenerals.some(og => og.uniqueId !== g.uniqueId && og.id === g.id && !isGeneralEquipped(og.uniqueId));
+
+                    return (
+                      <div key={g.uniqueId} className={`p-4 rounded-xl border shadow-md transition-all ${isEquipped ? 'bg-stone-900/50 border-stone-700 opacity-80' : 'bg-stone-800/80 border-stone-600 hover:border-blue-500 hover:bg-stone-800'}`}>
+                        <div className="flex justify-between items-center mb-2">
+                           <span className={`font-bold text-[15px] ${g.rarity === 5 ? 'text-amber-400' : g.rarity === 4 ? 'text-purple-400' : g.rarity === 3 ? 'text-blue-300' : g.rarity === 2 ? 'text-green-400' : 'text-stone-300'}`}>
+                             {g.name}
+                             {(g.breakthrough > 0) && <span className="text-pink-400 text-xs ml-1 bg-pink-950/50 px-1.5 py-0.5 rounded-full">+{g.breakthrough}</span>}
+                           </span>
+                           <div className="flex items-center gap-2">
+                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded border shadow-sm ${g.troop.color}`}>{g.troop.name}</span>
+                             <span className="text-xs font-mono bg-stone-950 px-2 py-1 rounded text-stone-400 border border-stone-700">Lv.{g.level}</span>
+                           </div>
+                        </div>
+                        <div className="flex justify-between items-end mt-2">
+                          <div className="flex flex-col gap-1">
+                            <RarityStars count={g.rarity} />
+                            {isEquipped ? (
+                              <span className="text-xs bg-amber-900/40 text-amber-500 px-2 py-1 rounded border border-amber-800/50 font-bold inline-block mt-1 w-max">
+                                第{equippedDeckIdx + 1}部隊
+                              </span>
+                            ) : (
+                              <span className="text-xs text-stone-500">陣営: {g.faction}</span>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            {canBreakthrough && (
+                               <button onClick={() => breakthroughGeneral(g.uniqueId)} className="text-[10px] px-3 py-1.5 bg-gradient-to-r from-pink-900 to-pink-800 hover:from-pink-800 hover:to-pink-700 text-pink-100 rounded-lg transition-colors flex items-center gap-1 border border-pink-700 shadow-md font-bold" title="同名武将を消費して全ステータス+10%">
+                                 <ArrowUpCircle className="w-3 h-3"/> 凸
+                               </button>
+                            )}
+                            {!isEquipped && (
+                               <button onClick={() => addToDeck(g)} className={`text-xs px-5 py-2 font-bold rounded-lg transition-colors bg-gradient-to-b from-blue-800 to-blue-900 hover:from-blue-700 hover:to-blue-800 text-blue-100 border border-blue-700 shadow-md flex items-center gap-1`}>
+                                 <Tent className="w-3 h-3"/> 配属
+                               </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {ownedGenerals.filter(g => filterFaction === 'ALL' || g.faction === filterFaction).length === 0 && (
+                    <div className="text-center text-stone-500 py-10">該当する武将がいません。</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* コンテンツ: ガチャ */}
+          {activeTab === 'gacha' && (
+            <div className="flex flex-col items-center justify-center h-full space-y-8">
+              <div className="text-center space-y-4">
+                <h2 className="text-3xl font-bold text-stone-100">名将登用</h2>
+                <p className="text-stone-400">小判を消費し、戦国の英傑（あるいは農民）を配下に加えよ。</p>
+              </div>
+              <div className="flex gap-8">
+                <button onClick={() => drawGacha(1)} className="bg-stone-800 hover:bg-stone-700 border border-stone-600 text-stone-200 px-8 py-4 rounded-lg flex flex-col items-center gap-2 transition-all hover:scale-105">
+                  <span className="text-xl font-bold">1回登用</span>
+                  <span className="text-amber-400 text-sm flex items-center gap-1"><Crown className="w-4 h-4"/> 200</span>
+                </button>
+                <button onClick={() => drawGacha(10)} className="bg-amber-900 hover:bg-amber-800 border border-amber-700 text-amber-100 px-8 py-4 rounded-lg flex flex-col items-center gap-2 transition-all hover:scale-105 shadow-[0_0_15px_rgba(217,119,6,0.3)]">
+                  <span className="text-xl font-bold">10回登用</span>
+                  <span className="text-amber-400 text-sm flex items-center gap-1"><Crown className="w-4 h-4"/> 1900</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* コンテンツ: 道具(アイテム使用) */}
+          {activeTab === 'item' && (
+            <div className="h-full flex flex-col">
+              <div className="mb-6 bg-stone-900 p-4 rounded-lg border border-stone-700">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-2"><Package className="w-6 h-6 text-amber-500"/> 道具箱</h2>
+                <p className="text-stone-300 text-sm mt-1">手に入れた道具はここから使用できるぞ。</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-stone-950 border border-stone-700 p-6 rounded-xl flex items-center gap-6 shadow-lg hover:border-stone-500 transition-colors">
+                  <div className="bg-blue-900/40 p-4 rounded-full border border-blue-700/50"><BookOpen className="w-10 h-10 text-blue-400"/></div>
+                  <div className="flex-1">
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="text-xl font-bold text-white">兵法書</h3>
+                      <span className="bg-stone-800 px-3 py-1 rounded text-sm font-bold border border-stone-600 text-amber-400">所持: {inventory.tactics || 0}</span>
+                    </div>
+                    <p className="text-sm text-stone-400 mb-4">武将1名に経験値500を与える。育成に欠かせぬ書物じゃ。</p>
+                    <button onClick={() => useItem('tactics')} disabled={(inventory.tactics || 0) <= 0} className="w-full bg-blue-700 hover:bg-blue-600 disabled:bg-stone-800 disabled:text-stone-500 text-white font-bold py-2 rounded border border-blue-500 transition-colors">使う</button>
+                  </div>
+                </div>
+                <div className="bg-stone-950 border border-stone-700 p-6 rounded-xl flex items-center gap-6 shadow-lg hover:border-stone-500 transition-colors">
+                  <div className="bg-red-900/40 p-4 rounded-full border border-red-700/50"><Flame className="w-10 h-10 text-red-400"/></div>
+                  <div className="flex-1">
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="text-xl font-bold text-white">陣太鼓</h3>
+                      <span className="bg-stone-800 px-3 py-1 rounded text-sm font-bold border border-stone-600 text-amber-400">所持: {inventory.drum || 0}</span>
+                    </div>
+                    <p className="text-sm text-stone-400 mb-4">次の出陣で部隊の戦力が1.5倍になる。強敵に挑む際に叩け。</p>
+                    <button onClick={() => useItem('drum')} disabled={(inventory.drum || 0) <= 0 || activeBuff === 'drum'} className={`w-full font-bold py-2 rounded border transition-colors ${activeBuff === 'drum' ? 'bg-amber-600 text-white border-amber-400' : 'bg-red-700 hover:bg-red-600 disabled:bg-stone-800 disabled:text-stone-500 text-white border-red-500'}`}>{activeBuff === 'drum' ? '発動中' : '使う'}</button>
+                  </div>
+                </div>
+                <div className="bg-stone-950 border border-stone-700 p-6 rounded-xl flex items-center gap-6 shadow-lg hover:border-stone-500 transition-colors">
+                  <div className="bg-green-900/40 p-4 rounded-full border border-green-700/50"><Megaphone className="w-10 h-10 text-green-400"/></div>
+                  <div className="flex-1">
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="text-xl font-bold text-white">法螺貝</h3>
+                      <span className="bg-stone-800 px-3 py-1 rounded text-sm font-bold border border-stone-600 text-amber-400">所持: {inventory.hora || 0}</span>
+                    </div>
+                    <p className="text-sm text-stone-400 mb-4">次の出陣で部隊の戦力が1.2倍になる。小規模な合戦に役立つ。</p>
+                    <button onClick={() => useItem('hora')} disabled={(inventory.hora || 0) <= 0 || activeBuff} className={`w-full font-bold py-2 rounded border transition-colors ${activeBuff === 'hora' ? 'bg-amber-600 text-white border-amber-400' : 'bg-green-700 hover:bg-green-600 disabled:bg-stone-800 disabled:text-stone-500 text-white border-green-500'}`}>{activeBuff === 'hora' ? '発動中' : '使う'}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* コンテンツ: 商店 (ショップ) */}
+          {activeTab === 'shop' && (
+            <div className="h-full flex flex-col relative overflow-hidden bg-stone-950 rounded-xl border border-stone-800 shadow-inner p-4 md:p-6">
+              <div className="mb-6 bg-gradient-to-r from-stone-900 to-stone-800 p-5 rounded-xl border border-stone-700 flex flex-col md:flex-row justify-between items-center gap-4 shadow-md">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2"><Store className="w-7 h-7 text-amber-500"/> 商店 (万屋)</h2>
+                  <p className="text-stone-400 text-sm mt-1">集めた銅銭で、戦に役立つ道具や武器を買い求めよ。</p>
+                </div>
+                <div className="bg-stone-950 px-5 py-3 rounded-xl border border-yellow-700/50 flex items-center gap-3 shadow-inner">
+                  <span className="text-stone-400 text-sm font-bold">所持銅銭:</span>
+                  <div className="flex items-center gap-1">
+                    <Coins className="w-6 h-6 text-yellow-500 drop-shadow-md" />
+                    <span className="font-mono text-2xl font-bold text-yellow-400 tracking-wide">{copper.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-10">
+                <section>
+                  <h3 className="text-2xl font-bold text-stone-100 mb-5 border-b-2 border-stone-700 pb-2 flex items-center gap-2">
+                    <Package className="w-6 h-6 text-blue-400"/> 道具
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {/* 兵法書 */}
+                    <div className="bg-gradient-to-b from-stone-800 to-stone-900 border-2 border-stone-700 p-5 rounded-xl flex flex-col shadow-lg hover:border-blue-500/50 transition-colors">
+                      <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-blue-900/30 rounded-lg border border-blue-800/50"><BookOpen className="w-8 h-8 text-blue-400"/></div>
+                          <span className="font-bold text-xl text-white">兵法書</span>
+                        </div>
+                        <span className="text-xs bg-stone-950 px-3 py-1.5 rounded-full border border-stone-700 text-stone-300 font-mono shadow-inner">所持: <span className="text-amber-400">{inventory.tactics || 0}</span></span>
+                      </div>
+                      <p className="text-sm text-stone-400 mb-6 flex-1 bg-stone-950/50 p-3 rounded-lg border border-stone-800/50 leading-relaxed">武将1名に経験値500を付与し、成長を促す。</p>
+                      <div className="flex gap-2 w-full mt-auto">
+                        <button onClick={() => buyItem('item', 'tactics', 2000, '兵法書', 1)} className="flex-1 bg-stone-800 hover:bg-stone-700 border border-stone-600 hover:border-stone-400 text-stone-200 py-2.5 rounded-lg flex justify-center items-center gap-1 transition-all font-bold shadow-md text-sm">
+                          1個
+                        </button>
+                        <button onClick={() => buyItem('item', 'tactics', 2000, '兵法書', 10)} className="flex-[2] bg-gradient-to-r from-stone-800 to-stone-700 hover:from-amber-900 hover:to-amber-800 border border-stone-600 hover:border-amber-500 text-stone-100 py-2.5 rounded-lg flex justify-center items-center gap-1.5 transition-all font-bold shadow-md text-sm">
+                          <Coins className="w-4 h-4 text-yellow-500"/> 20,000 (10個)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 陣太鼓 */}
+                    <div className="bg-gradient-to-b from-stone-800 to-stone-900 border-2 border-stone-700 p-5 rounded-xl flex flex-col shadow-lg hover:border-red-500/50 transition-colors">
+                      <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-red-900/30 rounded-lg border border-red-800/50"><Flame className="w-8 h-8 text-red-400"/></div>
+                          <span className="font-bold text-xl text-white">陣太鼓</span>
+                        </div>
+                        <span className="text-xs bg-stone-950 px-3 py-1.5 rounded-full border border-stone-700 text-stone-300 font-mono shadow-inner">所持: <span className="text-amber-400">{inventory.drum || 0}</span></span>
+                      </div>
+                      <p className="text-sm text-stone-400 mb-6 flex-1 bg-stone-950/50 p-3 rounded-lg border border-stone-800/50 leading-relaxed">次の出陣で自軍戦力1.5倍。強敵との決戦に。</p>
+                      <div className="flex gap-2 w-full mt-auto">
+                        <button onClick={() => buyItem('item', 'drum', 5000, '陣太鼓', 1)} className="flex-1 bg-stone-800 hover:bg-stone-700 border border-stone-600 hover:border-stone-400 text-stone-200 py-2.5 rounded-lg flex justify-center items-center gap-1 transition-all font-bold shadow-md text-sm">
+                          1個
+                        </button>
+                        <button onClick={() => buyItem('item', 'drum', 5000, '陣太鼓', 10)} className="flex-[2] bg-gradient-to-r from-stone-800 to-stone-700 hover:from-amber-900 hover:to-amber-800 border border-stone-600 hover:border-amber-500 text-stone-100 py-2.5 rounded-lg flex justify-center items-center gap-1.5 transition-all font-bold shadow-md text-sm">
+                          <Coins className="w-4 h-4 text-yellow-500"/> 50,000 (10個)
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 法螺貝 */}
+                    <div className="bg-gradient-to-b from-stone-800 to-stone-900 border-2 border-stone-700 p-5 rounded-xl flex flex-col shadow-lg hover:border-green-500/50 transition-colors">
+                      <div className="flex justify-between items-center mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-green-900/30 rounded-lg border border-green-800/50"><Megaphone className="w-8 h-8 text-green-400"/></div>
+                          <span className="font-bold text-xl text-white">法螺貝</span>
+                        </div>
+                        <span className="text-xs bg-stone-950 px-3 py-1.5 rounded-full border border-stone-700 text-stone-300 font-mono shadow-inner">所持: <span className="text-amber-400">{inventory.hora || 0}</span></span>
+                      </div>
+                      <p className="text-sm text-stone-400 mb-6 flex-1 bg-stone-950/50 p-3 rounded-lg border border-stone-800/50 leading-relaxed">次の出陣で自軍戦力1.2倍。小回りの利く戦具。</p>
+                      <div className="flex gap-2 w-full mt-auto">
+                        <button onClick={() => buyItem('item', 'hora', 3000, '法螺貝', 1)} className="flex-1 bg-stone-800 hover:bg-stone-700 border border-stone-600 hover:border-stone-400 text-stone-200 py-2.5 rounded-lg flex justify-center items-center gap-1 transition-all font-bold shadow-md text-sm">
+                          1個
+                        </button>
+                        <button onClick={() => buyItem('item', 'hora', 3000, '法螺貝', 10)} className="flex-[2] bg-gradient-to-r from-stone-800 to-stone-700 hover:from-amber-900 hover:to-amber-800 border border-stone-600 hover:border-amber-500 text-stone-100 py-2.5 rounded-lg flex justify-center items-center gap-1.5 transition-all font-bold shadow-md text-sm">
+                          <Coins className="w-4 h-4 text-yellow-500"/> 30,000 (10個)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <h3 className="text-2xl font-bold text-stone-100 mb-5 border-b-2 border-stone-700 pb-2 flex items-center gap-2">
+                    <Sword className="w-6 h-6 text-purple-400"/> 武具
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {MASTER_WEAPONS.map(wp => {
+                      const qty = inventoryWeapons[wp.id] || 0;
+                      // レア度でカードの装飾を変更
+                      const borderClass = wp.rarity === 5 ? 'border-amber-600/50 hover:border-amber-500 shadow-[0_0_15px_rgba(217,119,6,0.15)]' : 
+                                          wp.rarity === 4 ? 'border-purple-600/50 hover:border-purple-500 shadow-[0_0_15px_rgba(147,51,234,0.1)]' : 
+                                          'border-stone-700 hover:border-stone-500 shadow-md';
+                      const titleColor = wp.rarity === 5 ? 'text-amber-400' : wp.rarity === 4 ? 'text-purple-400' : 'text-stone-200';
+
+                      return (
+                        <div key={wp.id} className={`bg-gradient-to-b from-stone-800 to-stone-900 border-2 p-5 rounded-xl flex flex-col transition-colors ${borderClass}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <span className={`font-bold text-lg ${titleColor}`}>{wp.name}</span>
+                            <span className="text-xs bg-stone-950 px-2.5 py-1 rounded-full border border-stone-700 text-stone-300 shadow-inner">所持: {qty}</span>
+                          </div>
+                          <div className="mb-4 bg-stone-950/30 px-2 py-1 rounded-lg inline-block w-max"><RarityStars count={wp.rarity} /></div>
+                          
+                          <div className="text-xs text-stone-400 mb-6 bg-stone-950/50 p-3 rounded-lg border border-stone-800/50 flex flex-col gap-1">
+                            <div className="flex justify-between"><span>種類:</span> <span className="text-stone-200">{wp.type}</span></div>
+                            <div className="flex justify-between"><span>武力 / 知力 / 統率:</span> <span className="text-stone-200">+{wp.atk} / +{wp.int} / +{wp.def}</span></div>
+                          </div>
+                          
+                          <button onClick={() => buyItem('weapon', wp.id, wp.price, wp.name)} className="mt-auto bg-gradient-to-r from-stone-800 to-stone-700 hover:from-amber-900 hover:to-amber-800 border border-stone-600 hover:border-amber-500 text-stone-100 py-2.5 rounded-lg flex justify-center items-center gap-1.5 transition-all font-bold shadow-md text-sm">
+                            <Coins className="w-4 h-4 text-yellow-500"/> {wp.price.toLocaleString()} で購入
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+                
+                <section className="mt-10">
+                  <h3 className="text-2xl font-bold text-stone-100 mb-5 border-b-2 border-stone-700 pb-2 flex items-center gap-2">
+                    <Ship className="w-6 h-6 text-cyan-400"/> 軍備拡張
+                  </h3>
+                  {!hasNavy ? (
+                    <div className="bg-gradient-to-b from-stone-800 to-stone-900 border-2 border-cyan-700/50 p-5 rounded-xl flex flex-col shadow-[0_0_20px_rgba(6,182,212,0.15)] transition-colors">
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="font-bold text-xl text-cyan-300">水軍の創設</span>
+                      </div>
+                      <p className="text-sm text-stone-400 mb-6 flex-1 bg-stone-950/50 p-3 rounded-lg border border-stone-800/50 leading-relaxed">
+                        造船所を築き、強力な水軍を編成する。自軍の「港」から、全国のあらゆる「港」へ海路を使って直接攻め込めるようになる。
+                      </p>
+                      <button onClick={buyNavy} className="w-full bg-gradient-to-r from-cyan-900 to-cyan-800 hover:from-cyan-800 hover:to-cyan-700 border border-cyan-600 hover:border-cyan-400 text-cyan-100 py-3 rounded-lg flex justify-center items-center gap-2 transition-all font-bold shadow-md text-sm md:text-base">
+                        <Coins className="w-5 h-5 text-yellow-500"/> 50,000 銅銭で創設
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-cyan-900/20 border-2 border-cyan-600/50 p-5 rounded-xl flex flex-col items-center justify-center text-cyan-300">
+                      <Ship className="w-12 h-12 mb-2 opacity-50"/>
+                      <span className="font-bold text-lg">水軍創設済み</span>
+                      <span className="text-sm mt-1 text-cyan-400/70">全国の港へ海路で進軍が可能</span>
+                    </div>
+                  )}
+                </section>
+              </div>
+            </div>
+          )}
+
+          {/* コンテンツ: 同盟 */}
+          {activeTab === 'alliance' && (
+            <div className="flex gap-6 h-full">
+              <div className="w-1/2 bg-stone-950 p-6 rounded-lg border border-stone-800 shadow-xl flex flex-col">
+                <div className="flex items-center gap-3 mb-6 border-b border-stone-700 pb-4">
+                  <div className="bg-amber-900 p-3 rounded border border-amber-600 shadow"><Flag className="w-8 h-8 text-amber-200"/></div>
+                  <div>
+                    <h2 className="text-3xl font-bold text-white">{allianceInfo.name} <span className="text-lg text-amber-400 ml-2">Lv.{allianceInfo.level}</span></h2>
+                    <p className="text-sm text-stone-400 mt-1">盟主: {allianceInfo.members[0].name}</p>
+                  </div>
+                </div>
+
+                <div className="mb-4 bg-stone-900 p-4 rounded border border-stone-800">
+                  <div className="flex justify-between items-center mb-2">
+                    <h3 className="text-lg font-bold text-amber-400 flex items-center gap-2"><Sparkles className="w-5 h-5"/> 同盟技術 (パッシブ効果)</h3>
+                  </div>
+                  <p className="text-sm text-stone-300 mb-2">同盟レベルに応じて、全武将の戦力に強力なバフが付与されます。</p>
+                  <div className="flex justify-between text-sm bg-stone-950 p-2 rounded border border-stone-700">
+                    <span className="text-stone-400">現在の恩恵:</span>
+                    <span className="font-bold text-green-400">全武将の戦力 +{(allianceInfo.level - 1) * 5}%</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-stone-500 mt-1 px-2">
+                    <span>次レベル({allianceInfo.level + 1}) で:</span>
+                    <span>全武将の戦力 +{(allianceInfo.level) * 5}%</span>
+                  </div>
+                </div>
+
+                <div className="mb-6 bg-stone-900 p-4 rounded border border-stone-800">
+                  <div className="flex justify-between text-sm mb-1 text-stone-300">
+                    <span>同盟経験値</span><span>{allianceInfo.exp} / {allianceInfo.maxExp}</span>
+                  </div>
+                  <div className="w-full bg-stone-950 h-2 rounded-full overflow-hidden border border-stone-700">
+                    <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${(allianceInfo.exp / allianceInfo.maxExp) * 100}%` }}></div>
+                  </div>
+                  <div className="mt-4 flex gap-4">
+                    <button onClick={donateAlliance} className="flex-1 bg-yellow-700 hover:bg-yellow-600 text-white font-bold py-2 rounded flex justify-center items-center gap-2 transition-colors shadow-md border border-yellow-500">
+                      <Coins className="w-4 h-4"/> 1000銅銭 寄付する
+                    </button>
+                  </div>
+                </div>
+
+                <h3 className="text-lg font-bold mb-2 text-stone-200">構成員一覧</h3>
+                <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                  {allianceInfo.members.map((m, i) => (
+                    <div key={i} className="bg-stone-900 p-3 rounded flex justify-between items-center border border-stone-800">
+                      <div>
+                         <p className="font-bold text-stone-200">{m.name} <span className="text-xs bg-stone-700 px-1 rounded ml-1 text-stone-300">{m.role}</span></p>
+                      </div>
+                      <div className="text-right text-xs">
+                        <p className="text-stone-400">勢力値</p>
+                        <p className="font-mono text-amber-400 font-bold">{m.power.toLocaleString()}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="w-1/2 bg-stone-950 p-6 rounded-lg border border-stone-800 shadow-xl flex flex-col min-h-0">
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2 border-b border-stone-700 pb-2 flex-shrink-0"><MessageSquare className="w-5 h-5 text-blue-400"/> 同盟軍議 (チャット)</h3>
+                <div className="flex-1 bg-stone-900 rounded border border-stone-800 p-4 mb-4 overflow-y-auto flex flex-col gap-3 custom-scrollbar">
+                  {chatMessages.map(msg => (
+                    <div key={msg.id} className={`p-2 rounded text-sm text-stone-300 max-w-[80%] ${msg.isSelf ? 'self-end bg-amber-900/40 border border-amber-800' : 'self-start bg-stone-800'}`}>
+                      <span className={`text-xs font-bold block mb-1 ${msg.isSelf ? 'text-amber-400' : 'text-amber-500'}`}>{msg.sender}</span>
+                      {msg.text}
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
+                </div>
+                <div className="flex gap-2 flex-shrink-0">
+                  <input 
+                    type="text" 
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && sendChatMessage()}
+                    placeholder="軍議で発言する..." 
+                    className="flex-1 bg-stone-900 border border-stone-700 rounded px-3 py-2 text-stone-200 focus:outline-none focus:border-amber-500"
+                  />
+                  <button onClick={sendChatMessage} disabled={!chatInput.trim()} className="bg-blue-900 hover:bg-blue-800 disabled:bg-stone-800 disabled:text-stone-500 text-blue-300 px-4 py-2 rounded transition-colors"><Send className="w-5 h-5"/></button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* コンテンツ: AI軍師 */}
+          {activeTab === 'advisor' && (
+            <div className="flex flex-col h-full bg-stone-950 p-6 rounded-lg border border-stone-800 shadow-xl relative overflow-hidden">
+               <div className="mb-6 z-10 flex-shrink-0">
+                <h2 className="text-2xl font-bold text-stone-100 flex items-center gap-2"><Sparkles className="w-6 h-6 text-amber-500"/> 天才AI軍師への相談</h2>
+              </div>
+              <div className="flex flex-col flex-1 z-10 space-y-4 min-h-0">
+                <div className="flex gap-4 flex-shrink-0">
+                  <textarea value={advisorQuery} onChange={(e) => setAdvisorQuery(e.target.value)} placeholder="例: 次はどの土地を攻めるべきか？ 今の編制の弱点は？" className="flex-1 bg-stone-900 border border-stone-700 rounded p-4 text-stone-200 resize-none h-24 focus:outline-none focus:border-amber-500 custom-scrollbar"/>
+                </div>
+                <div className="flex justify-end flex-shrink-0">
+                  <button onClick={handleConsultAdvisor} disabled={isConsulting || !advisorQuery.trim()} className="bg-amber-900 hover:bg-amber-800 disabled:bg-stone-800 disabled:text-stone-600 text-amber-100 font-bold py-2 px-6 rounded border border-amber-700 flex items-center gap-2">
+                    {isConsulting ? <span className="animate-pulse">軍師が思考中...</span> : <><MessageSquare className="w-5 h-5"/> 助言を請う</>}
+                  </button>
+                </div>
+                <div className="flex-1 bg-stone-900 border border-stone-800 rounded-lg p-6 overflow-y-auto custom-scrollbar">
+                   {advisorResponse ? (
+                     <div className="flex gap-4">
+                        <div className="w-12 h-12 bg-amber-900 rounded-full flex items-center justify-center border-2 border-amber-600 flex-shrink-0"><span className="font-bold text-amber-200 text-sm">軍師</span></div>
+                        <div className="bg-stone-800 p-4 rounded-lg rounded-tl-none border border-stone-700 text-stone-200 whitespace-pre-wrap flex-1 leading-relaxed">{advisorResponse}</div>
+                     </div>
+                   ) : (
+                     <div className="h-full flex items-center justify-center text-stone-600">「何なりとお申し付けくだされ、御館様。」</div>
+                   )}
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+
+        {/* 右側：戦闘・システムログ */}
+        <aside className="w-80 bg-stone-950 border-l border-stone-800 flex flex-col shadow-2xl z-10">
+          <div className="p-3 border-b border-stone-800 bg-stone-900 flex items-center gap-2">
+            <ScrollText className="w-5 h-5 text-stone-400" />
+            <h3 className="font-bold text-stone-300 text-sm">軍議録 (ログ)</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar text-sm font-mono leading-relaxed">
+            {logs.map((log) => (
+               <div key={log.id} className={`pb-2 border-b border-stone-800/50 ${log.type === 'rare' ? 'text-amber-400 font-bold' : log.type === 'success' ? 'text-green-400' : log.type === 'warning' ? 'text-yellow-500' : log.type === 'error' ? 'text-red-400' : log.type === 'skill' ? 'text-purple-400' : log.type === 'system' ? 'text-blue-300' : 'text-stone-400'}`}>{log.text}</div>
+            ))}
+            <div ref={logsEndRef} />
+          </div>
+        </aside>
+
+      </div>
+
+      {/* 兵法書使用先選択モーダル */}
+      {showItemModal === 'tactics' && (
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-stone-900 border-2 border-stone-600 p-6 rounded-xl w-[550px] max-w-[95vw] max-h-[80vh] flex flex-col shadow-2xl">
+            <div className="flex justify-between items-center mb-2 border-b border-stone-700 pb-3">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2"><BookOpen className="w-6 h-6 text-blue-400"/> 誰に兵法書を使う？</h3>
+              <div className="bg-stone-950 px-4 py-1.5 rounded-lg border border-stone-700 text-stone-300">
+                所持数: <span className="text-amber-400 font-bold font-mono text-lg ml-1">{inventory.tactics}</span> 冊
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 mt-4">
+              {[...ownedGenerals]
+                .sort((a, b) => b.rarity - a.rarity || b.level - a.level)
+                .map(g => {
+                  const equippedDeckIdx = getEquippedDeckIndex(g.uniqueId);
+                  const isEquipped = equippedDeckIdx !== -1;
+                  return (
+                    <div key={g.uniqueId} className="w-full text-left p-3 bg-stone-800 hover:bg-stone-700 border border-stone-600 rounded-lg flex justify-between items-center transition-colors">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <RarityStars count={g.rarity} />
+                        <span className={`font-bold text-base ${g.rarity === 5 ? 'text-amber-400' : g.rarity === 4 ? 'text-purple-400' : g.rarity === 3 ? 'text-blue-300' : g.rarity === 2 ? 'text-green-400' : 'text-stone-400'}`}>{g.name}</span>
+                        <span className="text-sm font-mono text-stone-300 bg-stone-900 px-2 py-0.5 rounded border border-stone-700">Lv.{g.level}</span>
+                        {isEquipped && <span className="text-[10px] bg-stone-950 text-amber-500 px-1.5 py-0.5 rounded border border-stone-700 ml-1">第{equippedDeckIdx + 1}部隊</span>}
+                      </div>
+                      <div className="flex gap-1 shrink-0 ml-2">
+                        <button onClick={() => applyTactics(g.uniqueId, 1)} className="px-3 py-1.5 text-xs font-bold rounded bg-blue-900 text-blue-100 hover:bg-blue-800 border border-blue-700 shadow-sm transition-colors">1冊</button>
+                        {inventory.tactics >= 10 && (
+                          <button onClick={() => applyTactics(g.uniqueId, 10)} className="px-3 py-1.5 text-xs font-bold rounded bg-blue-800 text-blue-100 hover:bg-blue-700 border border-blue-600 shadow-sm transition-colors">10冊</button>
+                        )}
+                        {inventory.tactics > 1 && (
+                          <button onClick={() => applyTactics(g.uniqueId, inventory.tactics)} className="px-3 py-1.5 text-xs font-bold rounded bg-amber-900 text-amber-100 hover:bg-amber-800 border border-amber-700 shadow-sm transition-colors">最大({inventory.tactics})</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+              })}
+            </div>
+            <button onClick={() => setShowItemModal(null)} className="mt-6 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold rounded-lg border border-stone-600 transition-colors">やめる</button>
+          </div>
+        </div>
+      )}
+
+      {/* 武器装備選択モーダル */}
+      {showWeaponModalFor !== null && (
+        <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center backdrop-blur-sm">
+          <div className="bg-stone-900 border-2 border-amber-800 p-6 rounded-xl w-[500px] max-h-[80vh] flex flex-col shadow-2xl">
+            <h3 className="text-xl font-bold mb-4 text-white border-b border-stone-700 pb-2">武器を装備する</h3>
+            <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2">
+               {equippedWeapons[showWeaponModalFor] && (
+                 <button onClick={() => handleEquipWeapon(showWeaponModalFor, null)} className="w-full text-left p-3 bg-stone-950 border border-red-900/50 hover:bg-red-900/30 rounded-lg flex justify-center items-center text-red-400 font-bold transition-colors mb-4">
+                   現在の装備を外す
+                 </button>
+               )}
+               {MASTER_WEAPONS.map(w => {
+                 const quantity = inventoryWeapons[w.id] || 0;
+                 if (quantity <= 0) return null;
+                 return (
+                  <button key={w.id} onClick={() => handleEquipWeapon(showWeaponModalFor, w.id)} className="w-full text-left p-4 bg-stone-800 hover:bg-amber-900/30 hover:border-amber-700 border border-stone-600 rounded-lg flex justify-between items-center group transition-colors">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`font-bold ${w.rarity===5?'text-amber-400':'text-purple-300'}`}>{w.name}</span>
+                        <span className="text-xs bg-stone-900 px-2 rounded border border-stone-700 text-stone-400">所持: {quantity}</span>
+                      </div>
+                      <p className="text-xs text-stone-400">種類: {w.type} / 武力+{w.atk} 知力+{w.int} 統率+{w.def}</p>
+                    </div>
+                    <span className="text-amber-400 font-bold group-hover:scale-110">装備</span>
+                  </button>
+                 )
+               })}
+               {Object.values(inventoryWeapons).reduce((a, b) => a + b, 0) === 0 && (
+                 <div className="text-center text-stone-500 py-8">装備可能な武器がありません。</div>
+               )}
+            </div>
+            <button onClick={() => setShowWeaponModalFor(null)} className="mt-6 py-3 bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold rounded-lg border border-stone-600">閉じる</button>
+          </div>
+        </div>
+      )}
+      
+      <style dangerouslySetInnerHTML={{__html: `
+        .writing-vertical { writing-mode: vertical-rl; text-orientation: upright; }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
+        .animate-pop-in { animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
+        .animate-slide-right { animation: slideRight 0.8s ease-out forwards; }
+        .animate-slide-left { animation: slideLeft 0.8s ease-out forwards; }
+        .animate-flash { animation: flash 0.5s ease-in-out infinite alternate; }
+        .animate-spin-fast { animation: spin 0.3s linear infinite; }
+        
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes popIn { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+        @keyframes slideRight { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+        @keyframes slideLeft { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes flash { from { opacity: 0.5; background-color: rgba(255,255,255,0); } to { opacity: 1; background-color: rgba(255,255,255,0.2); } }
+        @keyframes spin { from { transform: rotate(0deg) scale(1); } to { transform: rotate(360deg) scale(1.5); } }
+        @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        @keyframes fall {
+          to { transform: translateY(110vh) rotate(720deg); }
+        }
+        .animate-fall {
+          animation-name: fall;
+          animation-timing-function: linear;
+          animation-iteration-count: infinite;
+        }
+
+        @keyframes chargeRight {
+          0% { transform: translateX(-150%) scale(0.8); opacity: 0; }
+          15% { opacity: 1; transform: translateX(20%) scale(1.1); }
+          30% { transform: translateX(40%) scale(1); }
+          40% { transform: translateX(45%) scale(1.05); opacity: 1;}
+          50% { transform: translateX(100%) scale(0.9); opacity: 0; }
+          100% { transform: translateX(100%) scale(0.9); opacity: 0; }
+        }
+        @keyframes chargeLeft {
+          0% { transform: translateX(150%) scale(0.8); opacity: 0; }
+          15% { opacity: 1; transform: translateX(-20%) scale(1.1); }
+          30% { transform: translateX(-40%) scale(1); }
+          40% { transform: translateX(-45%) scale(1.05); opacity: 1;}
+          50% { transform: translateX(-100%) scale(0.9); opacity: 0; }
+          100% { transform: translateX(-100%) scale(0.9); opacity: 0; }
+        }
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-5px) translateY(-3px) rotate(-0.5deg); }
+          20%, 40%, 60%, 80% { transform: translateX(5px) translateY(3px) rotate(0.5deg); }
+        }
+        @keyframes clashSparks {
+          0% { transform: rotate(0deg) scale(0.8); opacity: 0; }
+          20% { transform: rotate(45deg) scale(1.2); opacity: 1; }
+          40% { transform: rotate(-10deg) scale(1); opacity: 0.8; }
+          60% { transform: rotate(20deg) scale(1.1); opacity: 1; }
+          100% { transform: rotate(90deg) scale(0.8); opacity: 0; }
+        }
+        @keyframes clashSparksReverse {
+          0% { transform: scaleX(-1) rotate(0deg) scale(0.8); opacity: 0; }
+          20% { transform: scaleX(-1) rotate(-45deg) scale(1.2); opacity: 1; }
+          40% { transform: scaleX(-1) rotate(10deg) scale(1); opacity: 0.8; }
+          60% { transform: scaleX(-1) rotate(-20deg) scale(1.1); opacity: 1; }
+          100% { transform: scaleX(-1) rotate(-90deg) scale(0.8); opacity: 0; }
+        }
+
+        .animate-charge-right { animation: chargeRight 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite; }
+        .animate-charge-left { animation: chargeLeft 1.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) infinite; }
+        .animate-shake { animation: shake 0.3s ease-in-out infinite; }
+        .animate-spin-slow { animation: spin-slow 4s linear infinite; }
+        .animate-clash-sparks { animation: clashSparks 0.5s ease-out infinite; }
+        .animate-clash-sparks-reverse { animation: clashSparksReverse 0.5s ease-out infinite; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1c1917; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #44403c; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #57534e; }
+      `}} />
+    </div>
+  );
+}
